@@ -130,12 +130,22 @@ def generate_pmfby_pdf(
 
     # ── Extract fields ──────────────────────────────────────────────────────
     farmer = payload.get("farmer_name", "Unknown")
+    phone = payload.get("phone_number")
     crop = payload.get("crop_type", "Unknown")
+    district = payload.get("district") or "Tumakuru"
     taluk = payload.get("taluk", "Unknown")
     hobli = payload.get("hobli")
     village = payload.get("village")
     survey_no = payload.get("survey_no")
     area = payload.get("area_acres", 0.0)
+    irrigation_source = payload.get("irrigation_source")
+    observed_symptoms = payload.get("observed_symptoms") or []
+    pmfby_eligible = payload.get("pmfby_eligible")
+    photo_sha256 = payload.get("photo_sha256")
+    photo_lat = payload.get("photo_lat")
+    photo_lon = payload.get("photo_lon")
+    photo_timestamp = payload.get("photo_timestamp")
+    photo_path = payload.get("photo_path")
     plot_id = payload.get("plot_id", "N/A")
     lat = payload.get("centroid_lat", 0.0)
     lon = payload.get("centroid_lon", 0.0)
@@ -218,14 +228,26 @@ def generate_pmfby_pdf(
     farm_data = [
         ["Field", "Value"],
         ["Farmer Name", farmer],
-        ["Crop Type", crop],
-        ["Taluk / District", f"{taluk} / Tumakuru, Karnataka"],
     ]
+    if phone:
+        farm_data.append(["Phone Number", str(phone)])
+    farm_data.extend(
+        [
+            ["Crop Type", crop],
+            ["Taluk / District", f"{taluk} / {district}, Karnataka"],
+        ]
+    )
     if village or hobli:
         loc_parts = [p for p in [village, hobli] if p]
         farm_data.append(["Village / Hobli", " / ".join(loc_parts)])
     if survey_no:
-        farm_data.append(["Bhoomi Survey No.", str(survey_no)])
+        farm_data.append(["RTC / Bhoomi Survey No.", str(survey_no)])
+    if irrigation_source:
+        farm_data.append(["Water Source", str(irrigation_source)])
+    if observed_symptoms:
+        farm_data.append(["Observed Symptoms", ", ".join(map(str, observed_symptoms))])
+    if pmfby_eligible:
+        farm_data.append(["PMFBY Eligibility", str(pmfby_eligible)])
     farm_data.extend(
         [
             ["Plot Area", f"{area:.2f} acres"],
@@ -341,8 +363,42 @@ def generate_pmfby_pdf(
     story.append(hm_table)
     story.append(Spacer(1, 6 * mm))
 
+    # ── Geotagged Field Evidence (if photo captured) ────────────────────────
+    if photo_sha256 or (photo_path and Path(str(photo_path)).exists()):
+        story.append(Paragraph("3b. Geotagged Field Evidence", h2))
+        if photo_lat is not None and photo_lon is not None:
+            story.append(
+                Paragraph(
+                    f"<b>Captured GPS:</b> {float(photo_lat):.6f}°N, {float(photo_lon):.6f}°E"
+                    + (f" · <b>Timestamp:</b> {photo_timestamp}" if photo_timestamp else ""),
+                    body,
+                )
+            )
+        if photo_sha256:
+            story.append(
+                Paragraph(
+                    f"<b>Photo SHA-256:</b> <font name='Courier' size='8'>{photo_sha256}</font>",
+                    body,
+                )
+            )
+        if photo_path and Path(str(photo_path)).exists():
+            try:
+                from PIL import Image as PILImage
+
+                with PILImage.open(str(photo_path)) as pil_im:
+                    w_px, h_px = pil_im.size
+                aspect = (h_px / w_px) if w_px > 0 else 0.75
+                img_w = 55 * mm
+                img_h = min(45 * mm, img_w * aspect)
+                story.append(Spacer(1, 2 * mm))
+                story.append(Image(str(photo_path), width=img_w, height=img_h))
+            except Exception as exc:
+                logger.warning("Could not embed field photo in PDF: %s", exc)
+        story.append(Spacer(1, 5 * mm))
+
     # ── Preliminary SHA-256 (content hash without itself) ──────────────────
-    content_for_hash = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    hash_payload = {k: v for k, v in payload.items() if k != "photo_path"}
+    content_for_hash = json.dumps(hash_payload, sort_keys=True, default=str).encode("utf-8")
     sha256 = _sha256_bytes(content_for_hash)
 
     story.append(Paragraph("4. Tamper-Evident SHA-256 Ground-Truth Hash", h2))

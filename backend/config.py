@@ -28,7 +28,13 @@ class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────────────────────
     APP_ENV: str = "development"
     PDF_OUTPUT_DIR: str = "generated_pdfs"
+    PHOTO_UPLOAD_DIR: str = "uploaded_photos"
     FALLBACK_CACHE_DIR: str = "fallback_cache"
+
+    # ── Officer Auth ──────────────────────────────────────────────────────────
+    OFFICER_USERNAME: str = "officer@tumakuru.gov.in"
+    OFFICER_PASSWORD: str = "VECTORZZ2026"
+    OFFICER_SECRET_KEY: str = "sookshmajal-hackwarts-secret"
 
     # ── Rate limiting ─────────────────────────────────────────────────────────
     RATE_LIMIT_ANALYZE: str = "10/minute"

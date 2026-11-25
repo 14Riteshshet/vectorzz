@@ -54,10 +54,11 @@ class AnalyzePlotRequest(BaseModel):
     farmer_name: str = Field(
         "Tumakuru Farmer", min_length=2, max_length=255
     )
+    phone_number: str | None = Field(None, max_length=30)
     crop_type: str = Field(..., min_length=2, max_length=100)
     taluk: str | None = Field(
         None,
-        description="Tumakuru taluk (Madhugiri, Koratagere, Chikkanayakanahalli, C.N. Halli, Tumakuru, etc.)",
+        description="Karnataka taluk (Madhugiri, Koratagere, Chikkanayakanahalli, Challakere, Bagepalli, etc.)",
     )
     hobli: str | None = Field(None, max_length=100, description="Optional revenue hobli")
     village: str | None = Field(None, max_length=100, description="Optional revenue village")
@@ -65,6 +66,19 @@ class AnalyzePlotRequest(BaseModel):
     area_acres: float = Field(
         ..., ge=0.1, le=50.0, description="Plot area in acres (0.1–50)"
     )
+    irrigation_source: str | None = Field(
+        None, max_length=50, description="Purely Rain-Fed, Borewell, or Canal/Tank"
+    )
+    observed_symptoms: list[str] = Field(
+        default_factory=list, description="Field symptoms observed by farmer"
+    )
+    photo_base64: str | None = Field(
+        None, description="Optional base64-encoded geotagged field photo"
+    )
+    photo_filename: str | None = Field(None, max_length=120)
+    photo_lat: float | None = Field(None, ge=-90.0, le=90.0)
+    photo_lon: float | None = Field(None, ge=-180.0, le=180.0)
+    photo_timestamp: str | None = Field(None, max_length=64)
     polygon_coordinates: list[list[float]] = Field(
         ...,
         min_length=4,
@@ -186,12 +200,22 @@ class CropIrrigationGuidance(BaseModel):
 class AnalyzePlotResponse(BaseModel):
     plot_id: str
     farmer_name: str
+    phone_number: str | None = None
+    district: str = "Tumakuru"
     taluk: str
     hobli: str | None = None
     village: str | None = None
     survey_no: str | None = None
     crop_type: str
     area_acres: float
+    irrigation_source: str | None = None
+    observed_symptoms: list[str] = Field(default_factory=list)
+    pmfby_eligible: str = "NOT ELIGIBLE — Normal Moisture"
+    photo_sha256: str | None = None
+    photo_url: str | None = None
+    photo_lat: float | None = None
+    photo_lon: float | None = None
+    photo_timestamp: str | None = None
     centroid_lat: float
     centroid_lon: float
     satellite: SatelliteIndices
@@ -239,12 +263,22 @@ class PlotsListResponse(BaseModel):
 class RegionalPlotItem(BaseModel):
     plot_id: str
     farmer_name: str
+    phone_number: str | None = None
+    district: str = "Tumakuru"
     taluk: str
     hobli: str | None = None
     village: str | None = None
     survey_no: str | None = None
     crop_type: str
     area_acres: float
+    irrigation_source: str | None = None
+    observed_symptoms: list[str] = Field(default_factory=list)
+    pmfby_eligible: str | None = None
+    photo_sha256: str | None = None
+    photo_url: str | None = None
+    photo_lat: float | None = None
+    photo_lon: float | None = None
+    photo_timestamp: str | None = None
     centroid_lat: float
     centroid_lon: float
     polygon_coordinates: list[list[float]] = Field(default_factory=list)
@@ -277,6 +311,7 @@ class RegionalSummaryResponse(BaseModel):
 
 
 class CadastralVillageSummary(BaseModel):
+    district: str = "Tumakuru"
     taluk: str
     hobli: str
     village: str
@@ -289,6 +324,7 @@ class CadastralVillagesResponse(BaseModel):
 
 
 class CadastralParcelResponse(BaseModel):
+    district: str = "Tumakuru"
     taluk: str
     hobli: str
     village: str
@@ -298,6 +334,18 @@ class CadastralParcelResponse(BaseModel):
     default_crop: str
     coordinates: list[list[float]]
     geojson: dict[str, Any]
+
+
+class OfficerLoginRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=255)
+
+
+class OfficerLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    officer_email: str
+    expires_in_seconds: int
 
 
 class VerifyDossierResponse(BaseModel):

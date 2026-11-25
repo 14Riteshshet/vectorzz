@@ -7,6 +7,8 @@ PMFBY PDF dossier generation + SHA-256/QR verification, and Sarvam voice fallbac
 from __future__ import annotations
 
 import base64
+import hashlib
+import io
 import math
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,9 @@ from unittest.mock import patch
 import pytest
 import requests
 from httpx import ASGITransport, AsyncClient
+from PIL import Image as PILImage
+
+from backend.config import get_settings
 
 from backend.database import init_db
 from backend.main import app
@@ -499,12 +504,43 @@ async def test_drought_stage_healthy(async_client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_regional_summary_all_and_filtered(async_client: AsyncClient):
-    """GET /api/regional/summary returns seeded KPIs and supports taluk filters."""
-    resp_all = await async_client.get("/api/regional/summary?taluk=ALL")
+async def test_officer_auth_gate_and_regional_summary(async_client: AsyncClient):
+    """Protected endpoints require Officer Bearer token; login grants access."""
+    # 1. Unauthenticated requests must be rejected with 401
+    for protected_url in [
+        "/api/regional/summary?taluk=ALL",
+        "/api/history",
+        "/api/photos/nonexistent.jpg",
+    ]:
+        unauth = await async_client.get(protected_url)
+        assert unauth.status_code == 401, f"Expected 401 for {protected_url}"
+
+    # 2. Invalid credentials rejected
+    bad_login = await async_client.post(
+        "/api/officer/login",
+        json={"username": "officer@tumakuru.gov.in", "password": "wrong"},
+    )
+    assert bad_login.status_code == 401
+
+    # 3. Valid officer login returns signed bearer token
+    cfg = get_settings()
+    login_resp = await async_client.post(
+        "/api/officer/login",
+        json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 4. Authorized regional summary & history work
+    hist_resp = await async_client.get("/api/history", headers=headers)
+    assert hist_resp.status_code == 200
+    assert hist_resp.json()["total"] >= 8
+
+    resp_all = await async_client.get("/api/regional/summary?taluk=ALL", headers=headers)
     assert resp_all.status_code == 200, resp_all.text
     data_all = resp_all.json()
-    assert data_all["total_plots"] >= 4
+    assert data_all["total_plots"] >= 8
     assert data_all["total_acres"] > 0
     assert data_all["severe_count"] >= 1
     assert data_all["moderate_count"] >= 1
@@ -516,10 +552,12 @@ async def test_regional_summary_all_and_filtered(async_client: AsyncClient):
     for field in [
         "plot_id",
         "farmer_name",
+        "district",
         "taluk",
         "crop_type",
         "area_acres",
         "drought_stage",
+        "pmfby_eligible",
         "ndvi",
         "ndmi",
         "survival_liters",
@@ -528,13 +566,17 @@ async def test_regional_summary_all_and_filtered(async_client: AsyncClient):
     ]:
         assert field in first
 
-    resp_mad = await async_client.get("/api/regional/summary?taluk=Madhugiri")
+    resp_mad = await async_client.get(
+        "/api/regional/summary?taluk=Madhugiri", headers=headers
+    )
     assert resp_mad.status_code == 200
     mad_plots = resp_mad.json()["plots"]
     assert len(mad_plots) >= 1
     assert all(p["taluk"] == "Madhugiri" for p in mad_plots)
 
-    resp_cn = await async_client.get("/api/regional/summary?taluk=C.N. Halli")
+    resp_cn = await async_client.get(
+        "/api/regional/summary?taluk=C.N. Halli", headers=headers
+    )
     assert resp_cn.status_code == 200
     cn_plots = resp_cn.json()["plots"]
     assert len(cn_plots) >= 1
@@ -605,6 +647,96 @@ async def test_cadastral_villages_and_parcel(async_client: AsyncClient):
         "/api/cadastral/parcel?taluk=Madhugiri&village=Kodigenahalli&survey_no=999/9"
     )
     assert resp_missing.status_code == 404
+
+    # Expanded multi-district coverage check
+    taluks_present = {v["taluk"] for v in all_data["villages"]}
+    for expected_taluk in [
+        "Madhugiri",
+        "Koratagere",
+        "Chikkanayakanahalli",
+        "Pavagada",
+        "Sira",
+        "Challakere",
+        "Hiriyur",
+        "Bagepalli",
+        "Kalaburagi",
+        "Vijayapura",
+    ]:
+        assert expected_taluk in taluks_present, f"Missing taluk: {expected_taluk}"
+
+    challakere = await async_client.get(
+        "/api/cadastral/parcel?taluk=Challakere&village=Nayakanahatti&survey_no=88/1"
+    )
+    assert challakere.status_code == 200
+    assert challakere.json()["district"] == "Chitradurga"
+
+
+@pytest.mark.anyio
+async def test_geotagged_photo_upload_and_pdf_embedding(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Geotagged photo upload saves image, computes photo_sha256, folds into PDF & protects photo route."""
+    buf = io.BytesIO()
+    PILImage.new("RGB", (64, 48), color=(180, 90, 40)).save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    expected_photo_sha = hashlib.sha256(png_bytes).hexdigest()
+    photo_b64 = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+
+    severe_sat = {**MOCK_SAT_DATA, "ndvi": 0.08, "ndmi": -0.48}
+    payload = {
+        **VALID_PAYLOAD,
+        "phone_number": "+91 98451 99999",
+        "irrigation_source": "Purely Rain-Fed",
+        "observed_symptoms": ["Soil Cracking", "Leaf Wilting"],
+        "photo_base64": photo_b64,
+        "photo_filename": "field.png",
+        "photo_lat": 13.6621,
+        "photo_lon": 77.2017,
+        "photo_timestamp": "2026-10-30T09:15:00Z",
+    }
+    pdf_dir = tmp_path / "pdfs"
+    photo_dir = tmp_path / "photos"
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(pdf_dir)),
+        patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)),
+        patch("backend.main.fetch_sentinel2_indices", return_value=severe_sat),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+    ):
+        resp = await async_client.post("/api/analyse", json=payload)
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["photo_sha256"] == expected_photo_sha
+        assert data["pmfby_eligible"] == "ELIGIBLE — Severe Moisture Deficit"
+        assert data["irrigation_source"] == "Purely Rain-Fed"
+        assert data["observed_symptoms"] == ["Soil Cracking", "Leaf Wilting"]
+        assert data["pdf_sha256"] and len(data["pdf_sha256"]) == 64
+
+        # Verify photo SHA-256 is folded into stored claim_payload
+        ver_resp = await async_client.get(f"/api/verify/{data['pdf_sha256']}")
+        assert ver_resp.status_code == 200
+        ver_data = ver_resp.json()
+        assert ver_data["is_valid"] is True
+        assert ver_data["claim_payload"]["photo_sha256"] == expected_photo_sha
+
+        # Photo route is protected without token, accessible with officer token
+        photo_filename = data["photo_url"].rsplit("/", 1)[-1]
+        unauth_photo = await async_client.get(f"/api/photos/{photo_filename}")
+        assert unauth_photo.status_code == 401
+
+        cfg = get_settings()
+        login_resp = await async_client.post(
+            "/api/officer/login",
+            json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+        )
+        token = login_resp.json()["access_token"]
+        auth_photo = await async_client.get(
+            f"/api/photos/{photo_filename}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert auth_photo.status_code == 200
+        assert auth_photo.content == png_bytes
 
 
 @pytest.mark.anyio

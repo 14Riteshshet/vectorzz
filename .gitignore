@@ -31,8 +31,9 @@ ENV/
 *.sqlite3
 *.sqlite
 
-# Generated PDFs (runtime output)
+# Generated PDFs & uploaded field photos (runtime output)
 generated_pdfs/
+uploaded_photos/
 
 # IDE / OS
 .DS_Store

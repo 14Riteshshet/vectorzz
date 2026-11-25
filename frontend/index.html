@@ -55,6 +55,10 @@
 
       <div class="header-actions">
         <span class="badge-hackathon" aria-label="Hackwarts 2026 AgriTech Track">Hackwarts 2026</span>
+        <span class="officer-auth-badge" id="officer-auth-badge" style="display:none;">
+          🛡 Officer Verified
+          <button type="button" class="officer-logout-btn" id="btn-officer-logout" aria-label="Logout officer session">Logout</button>
+        </span>
         <button
           type="button"
           class="btn-secondary header-btn"
@@ -123,11 +127,42 @@
               Aggregated farmer plots across Tumakuru. Click any row to load its stress trajectory on the map and audit its PMFBY dossier.
             </p>
           </div>
-          <div class="regional-filter-pills" role="group" aria-label="Filter regional plots by taluk">
-            <button type="button" class="regional-pill active" data-regional-taluk="ALL" aria-pressed="true">All Taluks</button>
-            <button type="button" class="regional-pill" data-regional-taluk="Madhugiri" aria-pressed="false">Madhugiri</button>
-            <button type="button" class="regional-pill" data-regional-taluk="Koratagere" aria-pressed="false">Koratagere</button>
-            <button type="button" class="regional-pill" data-regional-taluk="C.N. Halli" aria-pressed="false">C.N. Halli</button>
+          <div class="regional-filter-controls">
+            <div class="regional-filter-pills" role="group" aria-label="Filter regional plots by taluk">
+              <button type="button" class="regional-pill active" data-regional-taluk="ALL" aria-pressed="true">All Regions</button>
+              <button type="button" class="regional-pill" data-regional-taluk="Madhugiri" aria-pressed="false">Madhugiri</button>
+              <button type="button" class="regional-pill" data-regional-taluk="Koratagere" aria-pressed="false">Koratagere</button>
+              <button type="button" class="regional-pill" data-regional-taluk="C.N. Halli" aria-pressed="false">C.N. Halli</button>
+              <button type="button" class="regional-pill" data-regional-taluk="Pavagada" aria-pressed="false">Pavagada</button>
+              <button type="button" class="regional-pill" data-regional-taluk="Challakere" aria-pressed="false">Challakere</button>
+            </div>
+            <select id="regional-taluk-select" class="form-select regional-taluk-select" aria-label="Filter by Karnataka taluk or district">
+              <option value="ALL" selected>All Karnataka Taluks &amp; Districts</option>
+              <optgroup label="Tumakuru District">
+                <option value="Tumakuru">All Tumakuru District</option>
+                <option value="Madhugiri">Madhugiri</option>
+                <option value="Koratagere">Koratagere</option>
+                <option value="Chikkanayakanahalli">Chikkanayakanahalli (C.N. Halli)</option>
+                <option value="Pavagada">Pavagada</option>
+                <option value="Sira">Sira</option>
+                <option value="Gubbi">Gubbi</option>
+                <option value="Tiptur">Tiptur</option>
+                <option value="Turuvekere">Turuvekere</option>
+                <option value="Kunigal">Kunigal</option>
+              </optgroup>
+              <optgroup label="Chitradurga District">
+                <option value="Chitradurga">All Chitradurga District</option>
+                <option value="Challakere">Challakere</option>
+                <option value="Hiriyur">Hiriyur</option>
+              </optgroup>
+              <optgroup label="Chikkaballapur District">
+                <option value="Bagepalli">Bagepalli</option>
+              </optgroup>
+              <optgroup label="North Karnataka">
+                <option value="Kalaburagi">Kalaburagi</option>
+                <option value="Vijayapura">Vijayapura</option>
+              </optgroup>
+            </select>
           </div>
         </div>
 
@@ -154,17 +189,18 @@
             <thead>
               <tr>
                 <th>Farmer</th>
-                <th>Taluk</th>
+                <th>Taluk / District</th>
+                <th>RTC Survey No.</th>
                 <th>Crop &amp; Area</th>
-                <th>NDVI / NDMI</th>
+                <th>Field Photo</th>
                 <th>Drought Stage</th>
                 <th>V<sub>surv</sub></th>
-                <th>PMFBY Dossier</th>
+                <th>Audit PDF</th>
               </tr>
             </thead>
             <tbody id="regional-table-body">
               <tr>
-                <td colspan="7" class="regional-empty">Loading regional plots…</td>
+                <td colspan="8" class="regional-empty">Officer login required to view regional records…</td>
               </tr>
             </tbody>
           </table>
@@ -192,9 +228,29 @@
               <label for="cad-taluk">Taluk</label>
               <select id="cad-taluk" class="form-select">
                 <option value="" selected>Select taluk…</option>
-                <option value="Madhugiri">Madhugiri</option>
-                <option value="Koratagere">Koratagere</option>
-                <option value="Chikkanayakanahalli">C.N. Halli</option>
+                <optgroup label="Tumakuru District">
+                  <option value="Madhugiri">Madhugiri</option>
+                  <option value="Koratagere">Koratagere</option>
+                  <option value="Chikkanayakanahalli">C.N. Halli</option>
+                  <option value="Pavagada">Pavagada</option>
+                  <option value="Sira">Sira</option>
+                  <option value="Tumakuru">Tumakuru</option>
+                  <option value="Gubbi">Gubbi</option>
+                  <option value="Tiptur">Tiptur</option>
+                  <option value="Turuvekere">Turuvekere</option>
+                  <option value="Kunigal">Kunigal</option>
+                </optgroup>
+                <optgroup label="Chitradurga District">
+                  <option value="Challakere">Challakere</option>
+                  <option value="Hiriyur">Hiriyur</option>
+                </optgroup>
+                <optgroup label="Chikkaballapur District">
+                  <option value="Bagepalli">Bagepalli</option>
+                </optgroup>
+                <optgroup label="North Karnataka">
+                  <option value="Kalaburagi">Kalaburagi</option>
+                  <option value="Vijayapura">Vijayapura</option>
+                </optgroup>
               </select>
             </div>
             <div class="cadastral-field">
@@ -214,6 +270,12 @@
         </div>
 
         <div id="map" role="application" aria-label="Leaflet map — draw your farm plot polygon"></div>
+        <div class="heatmap-legend" id="regional-heatmap-legend" style="display:none;">
+          <span class="heatmap-legend-title">🗺 Karnataka Drought Heatmap:</span>
+          <span class="heatmap-dot severe"></span> Severe / PMFBY Eligible
+          <span class="heatmap-dot moderate"></span> Moderate / Early Stress
+          <span class="heatmap-dot normal"></span> Normal Moisture
+        </div>
         <p id="polygon-status" role="status" aria-live="polite" class="polygon-status">
           No polygon drawn yet. Use the draw tool on the map or tap a preset.
         </p>
@@ -240,6 +302,19 @@
                 placeholder="e.g. Ramaiah Gowda"
                 required aria-required="true"
                 minlength="2" maxlength="255"
+              />
+            </div>
+
+            <!-- Phone number -->
+            <div class="form-field">
+              <label class="form-label" for="farmer-phone">
+                Phone Number <span class="form-hint" style="display:inline;">(Optional)</span>
+              </label>
+              <input
+                class="form-input" id="farmer-phone" name="phone_number"
+                type="tel" autocomplete="tel"
+                placeholder="e.g. +91 98451 22101"
+                maxlength="30"
               />
             </div>
 
@@ -271,16 +346,29 @@
               <select class="form-select" id="taluk" name="taluk"
                       required aria-required="true">
                 <option value="" disabled selected>Select taluk…</option>
-                <option value="Madhugiri">Madhugiri</option>
-                <option value="Koratagere">Koratagere</option>
-                <option value="Chikkanayakanahalli">Chikkanayakanahalli</option>
-                <option value="Tumakuru">Tumakuru</option>
-                <option value="Pavagada">Pavagada</option>
-                <option value="Tiptur">Tiptur</option>
-                <option value="Turuvekere">Turuvekere</option>
-                <option value="Kunigal">Kunigal</option>
-                <option value="Sira">Sira</option>
-                <option value="Gubbi">Gubbi</option>
+                <optgroup label="Tumakuru District">
+                  <option value="Madhugiri">Madhugiri</option>
+                  <option value="Koratagere">Koratagere</option>
+                  <option value="Chikkanayakanahalli">Chikkanayakanahalli</option>
+                  <option value="Tumakuru">Tumakuru</option>
+                  <option value="Pavagada">Pavagada</option>
+                  <option value="Tiptur">Tiptur</option>
+                  <option value="Turuvekere">Turuvekere</option>
+                  <option value="Kunigal">Kunigal</option>
+                  <option value="Sira">Sira</option>
+                  <option value="Gubbi">Gubbi</option>
+                </optgroup>
+                <optgroup label="Chitradurga District">
+                  <option value="Challakere">Challakere</option>
+                  <option value="Hiriyur">Hiriyur</option>
+                </optgroup>
+                <optgroup label="Chikkaballapur District">
+                  <option value="Bagepalli">Bagepalli</option>
+                </optgroup>
+                <optgroup label="North Karnataka">
+                  <option value="Kalaburagi">Kalaburagi</option>
+                  <option value="Vijayapura">Vijayapura</option>
+                </optgroup>
               </select>
             </div>
 
@@ -309,6 +397,54 @@
                 placeholder="e.g. 42/1 (auto-filled from lookup)"
                 maxlength="50"
               />
+            </div>
+
+            <!-- Water Source -->
+            <div class="form-field">
+              <label class="form-label" for="irrigation-source">Water Source</label>
+              <select class="form-select" id="irrigation-source" name="irrigation_source">
+                <option value="Purely Rain-Fed" selected>Purely Rain-Fed</option>
+                <option value="Borewell">Borewell</option>
+                <option value="Canal/Tank">Canal / Tank</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Observed Field Symptoms -->
+          <div class="form-field" style="margin-top:var(--space-5);">
+            <span class="form-label">Observed Field Symptoms</span>
+            <div class="symptoms-chip-group" role="group" aria-label="Observed field symptoms">
+              <button type="button" class="symptom-chip" data-symptom="Soil Cracking" aria-pressed="false">🪨 Soil Cracking</button>
+              <button type="button" class="symptom-chip" data-symptom="Leaf Wilting" aria-pressed="false">🥀 Leaf Wilting</button>
+              <button type="button" class="symptom-chip" data-symptom="Borewell Dried" aria-pressed="false">🕳 Borewell Dried</button>
+              <button type="button" class="symptom-chip" data-symptom="Flower Drop" aria-pressed="false">🌼 Flower Drop</button>
+            </div>
+          </div>
+
+          <!-- Live Geotagged Field Photo Capture -->
+          <div class="photo-capture-box" style="margin-top:var(--space-5);">
+            <div class="photo-capture-header">
+              <div>
+                <div class="form-label" style="margin-bottom:2px;">📷 Live Geotagged Field Photo Capture</div>
+                <span class="form-hint">Capture field condition photo with GPS lock for tamper-evident PMFBY evidence.</span>
+              </div>
+              <div class="photo-capture-actions">
+                <label for="field-photo-input" class="btn-secondary photo-upload-label">
+                  📸 Capture / Upload Photo
+                </label>
+                <input type="file" id="field-photo-input" accept="image/*" capture="environment" class="visually-hidden" />
+                <button type="button" class="btn-secondary" id="btn-lock-gps" style="padding:var(--space-2) var(--space-4);font-size:13px;">
+                  📍 Lock GPS
+                </button>
+              </div>
+            </div>
+            <div class="photo-preview-box" id="photo-preview-box" style="display:none;">
+              <img id="photo-preview-img" alt="Captured geotagged field photo preview" class="photo-preview-thumb" />
+              <div class="photo-preview-meta">
+                <span class="gps-locked-badge" id="photo-gps-badge">📍 GPS Coordinates Locked</span>
+                <div class="photo-meta-line" id="photo-gps-coords">Lat: — · Lon: —</div>
+                <div class="photo-meta-line" id="photo-timestamp-label">Timestamp: —</div>
+              </div>
             </div>
           </div>
 
@@ -353,6 +489,20 @@
              VIEW A: FARMER WATER COACH
              ═══════════════════════════════════════════════════════ -->
         <div id="farmer-view" class="mode-panel" role="tabpanel" aria-labelledby="mode-btn-farmer">
+
+          <!-- Farmer PMFBY Drought Eligibility Pre-Check Card -->
+          <div class="card eligibility-card" id="farmer-eligibility-card" style="display:none;">
+            <div class="eligibility-row">
+              <div>
+                <div class="metric-label" style="margin-bottom:4px;">PMFBY Drought Eligibility Pre-Check</div>
+                <div class="eligibility-badge" id="farmer-eligibility-badge">—</div>
+                <p class="eligibility-text" id="farmer-eligibility-text"></p>
+              </div>
+              <a id="farmer-pdf-receipt-link" href="#" download class="btn-primary" style="display:none;text-decoration:none;">
+                ⬇ Download Personal PMFBY Receipt (PDF)
+              </a>
+            </div>
+          </div>
 
           <!-- Prominent Sarvam AI Kannada Voice Advisory Player -->
           <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Sarvam AI Kannada voice advisory">
@@ -603,6 +753,64 @@
         Verify Hash
       </button>
       <div class="verify-result" id="verify-result" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- ── Government Officer Login Modal ───────────────────────────── -->
+  <div
+    class="modal-backdrop"
+    id="modal-officer-login"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modal-officer-title"
+    tabindex="-1"
+  >
+    <div class="modal">
+      <button type="button" class="modal-close" id="officer-login-close-btn"
+              aria-label="Close officer login modal">✕</button>
+      <h2 class="modal-title" id="modal-officer-title">
+        🛡 Government Officer Login
+      </h2>
+      <p class="card-subtitle" style="margin-bottom:var(--space-5);">
+        Sign in with your Karnataka Agriculture / PMFBY Regional Officer credentials to access multi-farmer records, geotagged photos, and the regional drought heatmap.
+      </p>
+      <form id="officer-login-form" novalidate>
+        <div class="form-field" style="margin-bottom:var(--space-4);">
+          <label class="form-label" for="officer-username">Officer Email</label>
+          <input class="form-input" id="officer-username" type="email" placeholder="officer@tumakuru.gov.in" required />
+        </div>
+        <div class="form-field" style="margin-bottom:var(--space-5);">
+          <label class="form-label" for="officer-password">Password</label>
+          <input class="form-input" id="officer-password" type="password" placeholder="••••••••••••" required />
+        </div>
+        <div id="officer-login-error" class="form-error-summary" role="alert" style="margin-bottom:var(--space-4);"></div>
+        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;">
+          <button type="submit" class="btn-primary" id="btn-officer-login-submit">
+            <span class="btn-label">🔓 Login as Officer</span>
+          </button>
+          <button type="button" class="btn-secondary" id="btn-fill-officer-demo">
+            ✨ Fill Demo Officer Credentials
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Geotagged Field Photo Preview Modal (Officer) ────────────── -->
+  <div
+    class="modal-backdrop"
+    id="modal-photo-preview"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="modal-photo-title"
+    tabindex="-1"
+  >
+    <div class="modal">
+      <button type="button" class="modal-close" id="photo-modal-close-btn"
+              aria-label="Close photo preview modal">✕</button>
+      <h2 class="modal-title" id="modal-photo-title">📷 Geotagged Field Photo</h2>
+      <img id="photo-modal-img" alt="Authenticated farmer field evidence photo" style="width:100%;max-height:360px;object-fit:contain;border-radius:14px;background:var(--color-7);" />
+      <p id="photo-modal-meta" class="card-subtitle" style="margin-top:var(--space-4);margin-bottom:0;"></p>
     </div>
   </div>
 

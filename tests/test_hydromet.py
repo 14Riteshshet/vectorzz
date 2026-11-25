@@ -4,6 +4,9 @@ Tests FAO-56 ET₀ calculation, survival litres formula, time-series builder, an
 """
 
 import math
+from unittest.mock import patch
+
+import requests
 
 from backend.hydromet import (
     _saturation_vapor_pressure,
@@ -193,7 +196,11 @@ class TestGetHydrometData:
         assert result["source"] == "fallback_cache"
 
     def test_all_expected_keys_present(self):
-        result = get_hydromet_data(13.6621, 77.2017, 1.0, "groundnut")
+        with patch(
+            "backend.hydromet.requests.get",
+            side_effect=requests.Timeout("mocked offline"),
+        ):
+            result = get_hydromet_data(13.6621, 77.2017, 1.0, "groundnut")
         expected_keys = {
             "et0_mm_day",
             "precipitation_mm",

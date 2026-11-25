@@ -40,6 +40,7 @@ class FarmPlot(Base):
     farmer_name: Mapped[str] = mapped_column(
         String(255), nullable=False, default="Tumakuru Farmer"
     )
+    phone_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
     taluk: Mapped[str] = mapped_column(
         String(100), nullable=False, default="Tumakuru"
     )
@@ -49,6 +50,14 @@ class FarmPlot(Base):
     district: Mapped[str] = mapped_column(String(100), default="Tumakuru")
     crop_type: Mapped[str] = mapped_column(String(100), nullable=False)
     area_acres: Mapped[float] = mapped_column(Float, nullable=False)
+    irrigation_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    observed_symptoms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    photo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    photo_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    photo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    photo_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    photo_timestamp: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pmfby_eligible: Mapped[str | None] = mapped_column(String(64), nullable=True)
     polygon_geojson: Mapped[str] = mapped_column(Text, nullable=False)  # GeoJSON string
     centroid_lat: Mapped[float] = mapped_column(Float, nullable=False)
     centroid_lon: Mapped[float] = mapped_column(Float, nullable=False)

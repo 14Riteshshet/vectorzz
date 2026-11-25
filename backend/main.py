@@ -8,8 +8,12 @@ Routes:
   Static mount at /                   – serves frontend/
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
+import time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -20,6 +24,7 @@ from typing import Annotated, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +51,8 @@ from backend.schemas import (
     GenerateDossierResponse,
     HealthResponse,
     HydrometData,
+    OfficerLoginRequest,
+    OfficerLoginResponse,
     PlotsListResponse,
     PlotSummary,
     RegionalPlotItem,
@@ -91,12 +98,75 @@ async def lifespan(app: FastAPI):
     logger.info("SookshmaJal starting up – initialising database …")
     await init_db()
     Path(settings.PDF_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    Path(settings.PHOTO_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
     logger.info("Ready. Team VECTORZZ · Hackwarts 2026 🌱")
     yield
     logger.info("SookshmaJal shutting down.")
 
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+_bearer_scheme = HTTPBearer(auto_error=False)
+_OFFICER_TOKEN_TTL_SEC = 86400
+
+
+def _create_officer_token(username: str) -> str:
+    payload_dict = {"sub": username, "exp": int(time.time()) + _OFFICER_TOKEN_TTL_SEC}
+    payload_b64 = (
+        base64.urlsafe_b64encode(json.dumps(payload_dict).encode("utf-8"))
+        .decode("ascii")
+        .rstrip("=")
+    )
+    sig = hmac.new(
+        settings.OFFICER_SECRET_KEY.encode("utf-8"),
+        payload_b64.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode("ascii").rstrip("=")
+    return f"{payload_b64}.{sig_b64}"
+
+
+def _verify_officer_token(token: str) -> str | None:
+    try:
+        payload_b64, sig_b64 = token.split(".", 1)
+        expected_sig = hmac.new(
+            settings.OFFICER_SECRET_KEY.encode("utf-8"),
+            payload_b64.encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        expected_b64 = (
+            base64.urlsafe_b64encode(expected_sig).decode("ascii").rstrip("=")
+        )
+        if not hmac.compare_digest(sig_b64, expected_b64):
+            return None
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if int(data.get("exp", 0)) < int(time.time()):
+            return None
+        return data.get("sub")
+    except Exception:
+        return None
+
+
+async def require_officer(
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_bearer_scheme)],
+) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Officer authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    officer_sub = _verify_officer_token(credentials.credentials)
+    if not officer_sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired officer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return officer_sub
+
+
+OfficerUser = Annotated[str, Depends(require_officer)]
 
 
 # ── App ────────────────────────────────────────────────────────────────────────
@@ -188,8 +258,37 @@ def _compute_centroid(coords: list[list[float]]) -> tuple[float, float]:
     return sum(lons) / len(lons), sum(lats) / len(lats)
 
 
+_TALUK_TO_DISTRICT = {
+    "Madhugiri": "Tumakuru",
+    "Koratagere": "Tumakuru",
+    "Chikkanayakanahalli": "Tumakuru",
+    "Pavagada": "Tumakuru",
+    "Sira": "Tumakuru",
+    "Tumakuru": "Tumakuru",
+    "Gubbi": "Tumakuru",
+    "Tiptur": "Tumakuru",
+    "Turuvekere": "Tumakuru",
+    "Kunigal": "Tumakuru",
+    "Challakere": "Chitradurga",
+    "Hiriyur": "Chitradurga",
+    "Bagepalli": "Chikkaballapur",
+    "Kalaburagi": "Kalaburagi",
+    "Vijayapura": "Vijayapura",
+}
+
+
 def _infer_taluk_from_coords(lat: float, lon: float) -> str:
-    """Infer Tumakuru taluk from plot centroid coordinates."""
+    """Infer Karnataka taluk from plot centroid coordinates."""
+    if lat >= 17.0:
+        return "Kalaburagi"
+    if lat >= 16.5:
+        return "Vijayapura"
+    if lat >= 14.2 and lon < 76.9:
+        return "Challakere"
+    if lat >= 14.0 and lon >= 77.15:
+        return "Pavagada"
+    if lon >= 77.5:
+        return "Bagepalli"
     if lon < 77.05:
         return "Chikkanayakanahalli"
     if lat >= 13.60:
@@ -197,6 +296,51 @@ def _infer_taluk_from_coords(lat: float, lon: float) -> str:
     if lat >= 13.45:
         return "Koratagere"
     return "Tumakuru"
+
+
+def _compute_pmfby_eligibility(stage: str) -> str:
+    if stage == "severe_drought":
+        return "ELIGIBLE — Severe Moisture Deficit"
+    if stage in ("moderate_drought", "early_stress"):
+        return "WATCHLIST — Moderate Stress"
+    return "NOT ELIGIBLE — Normal Moisture"
+
+
+def _save_uploaded_photo(
+    plot_id: str,
+    photo_base64: str,
+    filename: str | None = None,
+) -> tuple[str, str]:
+    """Decode base64 field photo, write to PHOTO_UPLOAD_DIR, return (path, sha256)."""
+    raw_b64 = photo_base64.strip()
+    ext = "jpg"
+    if raw_b64.startswith("data:") and "," in raw_b64:
+        header, raw_b64 = raw_b64.split(",", 1)
+        if "png" in header.lower():
+            ext = "png"
+        elif "webp" in header.lower():
+            ext = "webp"
+    elif filename:
+        cand = Path(filename).suffix.lstrip(".").lower()
+        if cand in {"jpg", "jpeg", "png", "webp"}:
+            ext = "jpg" if cand == "jpeg" else cand
+
+    try:
+        img_bytes = base64.b64decode(raw_b64, validate=False)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Invalid photo base64 payload.") from exc
+
+    if not img_bytes or len(img_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=422, detail="Photo must be non-empty and under 5 MB."
+        )
+
+    photo_sha256 = hashlib.sha256(img_bytes).hexdigest()
+    upload_dir = Path(settings.PHOTO_UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    out_path = upload_dir / f"{plot_id}.{ext}"
+    out_path.write_bytes(img_bytes)
+    return str(out_path), photo_sha256
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -214,7 +358,32 @@ async def health_check():
     )
 
 
+@app.post(
+    "/api/officer/login",
+    response_model=OfficerLoginResponse,
+    tags=["Auth"],
+)
+async def officer_login(body: OfficerLoginRequest):
+    """Authenticate a Regional Agricultural / PMFBY Officer and return a signed bearer token."""
+    user_ok = hmac.compare_digest(body.username.strip(), settings.OFFICER_USERNAME)
+    pass_ok = hmac.compare_digest(body.password, settings.OFFICER_PASSWORD)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid officer username or password.",
+        )
+    token = _create_officer_token(settings.OFFICER_USERNAME)
+    return OfficerLoginResponse(
+        access_token=token,
+        token_type="bearer",
+        officer_email=settings.OFFICER_USERNAME,
+        expires_in_seconds=_OFFICER_TOKEN_TTL_SEC,
+    )
+
+
 @app.post("/api/analyze-plot", response_model=AnalyzePlotResponse, tags=["Analysis"])
+@app.post("/api/analyse", response_model=AnalyzePlotResponse, tags=["Analysis"], include_in_schema=False)
+@app.post("/api/analyze", response_model=AnalyzePlotResponse, tags=["Analysis"], include_in_schema=False)
 @_rate_limit(settings.RATE_LIMIT_ANALYZE)
 async def analyze_plot(
     body: AnalyzePlotRequest,
@@ -331,16 +500,38 @@ async def analyze_plot(
     # ── 4. Persist FarmPlot ──────────────────────────────────────────────────
     plot_id = str(_uuid_mod.uuid4())
     geojson_str = json.dumps(body.to_geojson_polygon())
+    district = _TALUK_TO_DISTRICT.get(effective_taluk, "Tumakuru")
+    pmfby_eligible = _compute_pmfby_eligibility(drought.stage)
+    base_url = str(request.base_url).rstrip("/")
+
+    photo_path: str | None = None
+    photo_sha256: str | None = None
+    photo_url: str | None = None
+    if body.photo_base64:
+        photo_path, photo_sha256 = _save_uploaded_photo(
+            plot_id, body.photo_base64, body.photo_filename
+        )
+        photo_url = f"{base_url}/api/photos/{Path(photo_path).name}"
 
     db_plot = FarmPlot(
         id=plot_id,
         farmer_name=body.farmer_name,
+        phone_number=body.phone_number,
+        district=district,
         taluk=effective_taluk,
         hobli=body.hobli,
         village=body.village,
         survey_no=body.survey_no,
         crop_type=body.crop_type,
         area_acres=body.area_acres,
+        irrigation_source=body.irrigation_source,
+        observed_symptoms=body.observed_symptoms,
+        photo_path=photo_path,
+        photo_sha256=photo_sha256,
+        photo_lat=body.photo_lat,
+        photo_lon=body.photo_lon,
+        photo_timestamp=body.photo_timestamp,
+        pmfby_eligible=pmfby_eligible,
         polygon_geojson=geojson_str,
         centroid_lat=lat_c,
         centroid_lon=lon_c,
@@ -396,12 +587,22 @@ async def analyze_plot(
     claim_payload = {
         "plot_id": plot_id,
         "farmer_name": body.farmer_name,
+        "phone_number": body.phone_number,
         "crop_type": body.crop_type,
+        "district": district,
         "taluk": effective_taluk,
         "hobli": body.hobli,
         "village": body.village,
         "survey_no": body.survey_no,
         "area_acres": body.area_acres,
+        "irrigation_source": body.irrigation_source,
+        "observed_symptoms": body.observed_symptoms,
+        "pmfby_eligible": pmfby_eligible,
+        "photo_sha256": photo_sha256,
+        "photo_lat": body.photo_lat,
+        "photo_lon": body.photo_lon,
+        "photo_timestamp": body.photo_timestamp,
+        "photo_path": photo_path,
         "centroid_lat": lat_c,
         "centroid_lon": lon_c,
         "satellite": sat_payload,
@@ -411,7 +612,6 @@ async def analyze_plot(
     }
 
     try:
-        base_url = str(request.base_url).rstrip("/")
         pdf_path, pdf_sha256 = generate_pmfby_pdf(
             payload=claim_payload,
             output_dir=settings.PDF_OUTPUT_DIR,
@@ -419,14 +619,15 @@ async def analyze_plot(
         )
         pdf_download_url = f"{base_url}/api/pdf/{Path(pdf_path).name}"
 
-        # ClaimDossier record
+        # ClaimDossier record (omit local filesystem photo_path in stored JSON)
+        stored_claim_payload = {k: v for k, v in claim_payload.items() if k != "photo_path"}
         pdf_size = Path(pdf_path).stat().st_size if Path(pdf_path).exists() else 0
         db_claim = ClaimDossier(
             plot_id=plot_id,
             pdf_path=pdf_path,
             sha256_hash=pdf_sha256,
             pdf_size_bytes=pdf_size,
-            claim_payload=claim_payload,
+            claim_payload=stored_claim_payload,
             is_verified=True,
             verified_at=datetime.utcnow(),
         )
@@ -441,12 +642,22 @@ async def analyze_plot(
     return AnalyzePlotResponse(
         plot_id=plot_id,
         farmer_name=body.farmer_name,
+        phone_number=body.phone_number,
+        district=district,
         taluk=effective_taluk,
         hobli=body.hobli,
         village=body.village,
         survey_no=body.survey_no,
         crop_type=body.crop_type,
         area_acres=body.area_acres,
+        irrigation_source=body.irrigation_source,
+        observed_symptoms=body.observed_symptoms,
+        pmfby_eligible=pmfby_eligible,
+        photo_sha256=photo_sha256,
+        photo_url=photo_url,
+        photo_lat=body.photo_lat,
+        photo_lon=body.photo_lon,
+        photo_timestamp=body.photo_timestamp,
         centroid_lat=lat_c,
         centroid_lon=lon_c,
         satellite=sat_indices,
@@ -535,6 +746,12 @@ async def list_plots(db: DbSession):
     return PlotsListResponse(total=len(summaries), plots=summaries)
 
 
+@app.get("/api/history", response_model=PlotsListResponse, tags=["Plots"])
+async def list_history_protected(db: DbSession, _officer: OfficerUser):
+    """Protected all-farmers history endpoint for authenticated Regional Officers."""
+    return await list_plots(db)
+
+
 def _extract_polygon_coords(polygon_geojson: str) -> list[list[float]]:
     try:
         parsed = json.loads(polygon_geojson)
@@ -552,11 +769,12 @@ def _extract_polygon_coords(polygon_geojson: str) -> list[list[float]]:
 async def regional_summary(
     request: Request,
     db: DbSession,
+    _officer: OfficerUser,
     taluk: str = "ALL",
 ):
     """
     Aggregate regional KPIs and all saved FarmPlot records for the Regional Officer view.
-    Supports filtering by taluk (e.g. 'ALL', 'Madhugiri', 'Koratagere', 'C.N. Halli').
+    Requires a valid Officer Bearer token. Supports filtering by taluk or district.
     """
     taluk_clean = (taluk or "ALL").strip()
     stmt = (
@@ -574,7 +792,10 @@ async def regional_summary(
             "chikkanayakanahalli": ["chikkanayakanahalli", "c.n. halli", "cn halli"],
         }
         accepted = aliases.get(taluk_clean.lower(), [taluk_clean.lower()])
-        stmt = stmt.where(func.lower(FarmPlot.taluk).in_(accepted))
+        stmt = stmt.where(
+            func.lower(FarmPlot.taluk).in_(accepted)
+            | func.lower(FarmPlot.district).in_(accepted)
+        )
 
     result = await db.execute(stmt)
     plots = result.scalars().all()
@@ -624,16 +845,32 @@ async def regional_summary(
             else None
         )
 
+        photo_url = (
+            f"{base_url}/api/photos/{Path(p.photo_path).name}"
+            if p.photo_path
+            else None
+        )
+
         items.append(
             RegionalPlotItem(
                 plot_id=p.id,
                 farmer_name=p.farmer_name,
+                phone_number=p.phone_number,
+                district=p.district or _TALUK_TO_DISTRICT.get(p.taluk, "Tumakuru"),
                 taluk=p.taluk,
                 hobli=p.hobli,
                 village=p.village,
                 survey_no=p.survey_no,
                 crop_type=p.crop_type,
                 area_acres=p.area_acres,
+                irrigation_source=p.irrigation_source,
+                observed_symptoms=p.observed_symptoms or [],
+                pmfby_eligible=p.pmfby_eligible or _compute_pmfby_eligibility(stage),
+                photo_sha256=p.photo_sha256,
+                photo_url=photo_url,
+                photo_lat=p.photo_lat,
+                photo_lon=p.photo_lon,
+                photo_timestamp=p.photo_timestamp,
                 centroid_lat=p.centroid_lat,
                 centroid_lon=p.centroid_lon,
                 polygon_coordinates=_extract_polygon_coords(p.polygon_geojson),
@@ -673,6 +910,12 @@ async def regional_summary(
     "/api/plots/{plot_id}/dossier",
     response_model=GenerateDossierResponse,
     tags=["Verification"],
+)
+@app.post(
+    "/api/dossier/{plot_id}",
+    response_model=GenerateDossierResponse,
+    tags=["Verification"],
+    include_in_schema=False,
 )
 async def generate_plot_dossier(
     plot_id: str,
@@ -742,12 +985,23 @@ async def generate_plot_dossier(
     claim_payload = {
         "plot_id": plot_id,
         "farmer_name": plot.farmer_name,
+        "phone_number": plot.phone_number,
         "crop_type": plot.crop_type,
+        "district": plot.district or _TALUK_TO_DISTRICT.get(plot.taluk, "Tumakuru"),
         "taluk": plot.taluk,
         "hobli": plot.hobli,
         "village": plot.village,
         "survey_no": plot.survey_no,
         "area_acres": plot.area_acres,
+        "irrigation_source": plot.irrigation_source,
+        "observed_symptoms": plot.observed_symptoms or [],
+        "pmfby_eligible": plot.pmfby_eligible
+        or _compute_pmfby_eligibility(drought.stage),
+        "photo_sha256": plot.photo_sha256,
+        "photo_lat": plot.photo_lat,
+        "photo_lon": plot.photo_lon,
+        "photo_timestamp": plot.photo_timestamp,
+        "photo_path": plot.photo_path,
         "centroid_lat": plot.centroid_lat,
         "centroid_lon": plot.centroid_lon,
         "satellite": {
@@ -777,6 +1031,7 @@ async def generate_plot_dossier(
     pdf_size = Path(pdf_path).stat().st_size if Path(pdf_path).exists() else 0
     now_dt = datetime.utcnow()
 
+    stored_claim_payload = {k: v for k, v in claim_payload.items() if k != "photo_path"}
     hash_res = await db.execute(
         select(ClaimDossier).where(ClaimDossier.sha256_hash == pdf_sha256)
     )
@@ -787,7 +1042,7 @@ async def generate_plot_dossier(
             pdf_path=pdf_path,
             sha256_hash=pdf_sha256,
             pdf_size_bytes=pdf_size,
-            claim_payload=claim_payload,
+            claim_payload=stored_claim_payload,
             is_verified=True,
             verified_at=now_dt,
         )
@@ -849,19 +1104,25 @@ async def list_cadastral_villages(taluk: str | None = None):
     if canon_taluk and canon_taluk.upper() != "ALL":
         parcels = [p for p in parcels if p["taluk"].lower() == canon_taluk.lower()]
 
-    grouped: dict[tuple[str, str, str], list[str]] = {}
+    grouped: dict[tuple[str, str, str, str], list[str]] = {}
     for p in parcels:
-        key = (p["taluk"], p["hobli"], p["village"])
+        key = (
+            p.get("district") or _TALUK_TO_DISTRICT.get(p["taluk"], "Tumakuru"),
+            p["taluk"],
+            p["hobli"],
+            p["village"],
+        )
         grouped.setdefault(key, []).append(p["survey_no"])
 
     villages = [
         CadastralVillageSummary(
+            district=d,
             taluk=t,
             hobli=h,
             village=v,
             survey_numbers=surveys,
         )
-        for (t, h, v), surveys in grouped.items()
+        for (d, t, h, v), surveys in grouped.items()
     ]
     return CadastralVillagesResponse(taluk=canon_taluk or "ALL", villages=villages)
 
@@ -892,6 +1153,8 @@ async def get_cadastral_parcel(taluk: str, village: str, survey_no: str):
         )
 
     return CadastralParcelResponse(
+        district=match.get("district")
+        or _TALUK_TO_DISTRICT.get(match["taluk"], "Tumakuru"),
         taluk=match["taluk"],
         hobli=match["hobli"],
         village=match["village"],
@@ -913,6 +1176,17 @@ async def get_cadastral_parcel(taluk: str, village: str, survey_no: str):
             },
         },
     )
+
+
+@app.get("/api/photos/{filename}", tags=["Files"])
+async def get_uploaded_photo(filename: str, _officer: OfficerUser):
+    """Serve an uploaded geotagged field photo (protected; requires Officer token)."""
+    safe_name = Path(filename).name
+    photo_dir = Path(settings.PHOTO_UPLOAD_DIR).resolve()
+    photo_path = (photo_dir / safe_name).resolve()
+    if not photo_path.exists() or photo_path.parent != photo_dir:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    return FileResponse(path=str(photo_path))
 
 
 @app.get("/api/pdf/{filename}", tags=["Files"])

@@ -63,11 +63,17 @@ var farmerChart = null;
 var officerChart = null;
 var map = null;
 var drawnItems = null;
+var regionalHeatLayer = null;
 var regionalTalukFilter = 'ALL';
 var regionalPlots = [];
 var selectedRegionalPlotId = null;
 var cadastralVillagesCache = [];
 var selectedCadastral = null;
+var officerToken = (function() {
+  try { return sessionStorage.getItem('sookshmajal_officer_token') || ''; } catch (e) { return ''; }
+})();
+var pendingOfficerAction = null;
+var capturedPhotoData = null; // { base64, filename, lat, lon, timestamp }
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 window.addEventListener('load', function() {
@@ -82,6 +88,7 @@ window.addEventListener('load', function() {
 
   initMap();
   initUI();
+  updateOfficerBadgeUI();
 });
 
 // ── Map initialisation ────────────────────────────────────────────────────────
@@ -108,6 +115,8 @@ function initMap() {
 
   drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
+  regionalHeatLayer = new L.LayerGroup();
+  map.addLayer(regionalHeatLayer);
 
   if (typeof L.Control !== 'undefined' && typeof L.Control.Draw !== 'undefined') {
     var drawControl = new L.Control.Draw({
@@ -163,23 +172,213 @@ function initUI() {
   // ── Mode Switcher ──────────────────────────────────────────────────────────
   document.querySelectorAll('.mode-segment').forEach(function(btn) {
     btn.addEventListener('click', function() {
+      var targetMode = btn.dataset.mode;
+      if (targetMode === 'officer' && !officerToken) {
+        openOfficerLoginModal('officer');
+        return;
+      }
       if (isHistoryOpen) closeHistoryPage(true);
-      setMode(btn.dataset.mode);
+      setMode(targetMode);
     });
   });
 
-  // ── Regional Taluk Filter Pills ────────────────────────────────────────────
+  // ── Officer Login / Logout / Photo Modal ───────────────────────────────────
+  var $officerModal = document.getElementById('modal-officer-login');
+  var $photoModal = document.getElementById('modal-photo-preview');
+
+  document.getElementById('officer-login-close-btn').addEventListener('click', function() {
+    $officerModal.classList.remove('open');
+  });
+  $officerModal.addEventListener('click', function(e) {
+    if (e.target === $officerModal) $officerModal.classList.remove('open');
+  });
+  document.getElementById('photo-modal-close-btn').addEventListener('click', function() {
+    $photoModal.classList.remove('open');
+  });
+  $photoModal.addEventListener('click', function(e) {
+    if (e.target === $photoModal) $photoModal.classList.remove('open');
+  });
+
+  document.getElementById('btn-fill-officer-demo').addEventListener('click', function() {
+    document.getElementById('officer-username').value = 'officer@tumakuru.gov.in';
+    document.getElementById('officer-password').value = 'VECTORZZ2026';
+    hideErrors(document.getElementById('officer-login-error'));
+  });
+
+  document.getElementById('officer-login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    var $err = document.getElementById('officer-login-error');
+    var $submit = document.getElementById('btn-officer-login-submit');
+    hideErrors($err);
+
+    var username = document.getElementById('officer-username').value.trim();
+    var password = document.getElementById('officer-password').value;
+    if (!username || !password) {
+      showError($err, 'Please enter officer email and password.');
+      return;
+    }
+    setButtonLoading($submit, true);
+    try {
+      var auth = await fetchJSON('/api/officer/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username, password: password })
+      });
+      officerToken = auth.access_token;
+      try { sessionStorage.setItem('sookshmajal_officer_token', officerToken); } catch (err) {}
+      updateOfficerBadgeUI();
+      setButtonLoading($submit, false);
+      $officerModal.classList.remove('open');
+      showToast('🛡 Officer verified: ' + auth.officer_email, 'success');
+
+      var action = pendingOfficerAction;
+      pendingOfficerAction = null;
+      if (action === 'history') {
+        openHistoryPage(true);
+      } else {
+        if (isHistoryOpen) closeHistoryPage(true);
+        setMode('officer');
+      }
+    } catch (err) {
+      setButtonLoading($submit, false, true);
+      showError($err, err.message || 'Invalid credentials');
+    }
+  });
+
+  document.getElementById('btn-officer-logout').addEventListener('click', function() {
+    clearOfficerSession();
+    showToast('Logged out of Officer session.', 'warning');
+  });
+
+  // ── Regional Taluk Filter Pills & Dropdown ─────────────────────────────────
+  function applyRegionalFilter(talukVal) {
+    regionalTalukFilter = talukVal || 'ALL';
+    selectedRegionalPlotId = null;
+    document.querySelectorAll('.regional-pill').forEach(function(p) {
+      var isActive = (p.dataset.regionalTaluk || '').toLowerCase() === regionalTalukFilter.toLowerCase();
+      p.classList.toggle('active', isActive);
+      p.setAttribute('aria-pressed', String(isActive));
+    });
+    var $sel = document.getElementById('regional-taluk-select');
+    if ($sel) {
+      $sel.value = regionalTalukFilter === 'C.N. Halli' ? 'Chikkanayakanahalli' : regionalTalukFilter;
+    }
+    if (officerToken) {
+      loadRegionalSummary(regionalTalukFilter);
+    }
+  }
+
   document.querySelectorAll('.regional-pill').forEach(function(pill) {
     pill.addEventListener('click', function() {
-      regionalTalukFilter = pill.dataset.regionalTaluk || 'ALL';
-      document.querySelectorAll('.regional-pill').forEach(function(p) {
-        var isActive = p === pill;
-        p.classList.toggle('active', isActive);
-        p.setAttribute('aria-pressed', String(isActive));
-      });
-      loadRegionalSummary(regionalTalukFilter);
+      applyRegionalFilter(pill.dataset.regionalTaluk || 'ALL');
     });
   });
+
+  var $regSelect = document.getElementById('regional-taluk-select');
+  if ($regSelect) {
+    $regSelect.addEventListener('change', function() {
+      applyRegionalFilter($regSelect.value || 'ALL');
+    });
+  }
+
+  // ── Symptoms Chips & Geotagged Photo Capture ───────────────────────────────
+  document.querySelectorAll('.symptom-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      var active = chip.classList.toggle('active');
+      chip.setAttribute('aria-pressed', String(active));
+    });
+  });
+
+  var $photoInput = document.getElementById('field-photo-input');
+  var $lockGpsBtn = document.getElementById('btn-lock-gps');
+
+  function lockGpsCoordinates(onDone) {
+    var fallbackCoords = function() {
+      if (drawnPolygon && drawnPolygon.length) {
+        var lons = drawnPolygon.map(function(c) { return c[0]; });
+        var lats = drawnPolygon.map(function(c) { return c[1]; });
+        var avgLat = lats.reduce(function(a, b) { return a + b; }, 0) / lats.length;
+        var avgLon = lons.reduce(function(a, b) { return a + b; }, 0) / lons.length;
+        return { lat: avgLat, lon: avgLon, source: 'plot centroid' };
+      }
+      return { lat: 13.5300, lon: 77.1200, source: 'Tumakuru default' };
+    };
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          onDone({
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            source: 'device GPS'
+          });
+        },
+        function() { onDone(fallbackCoords()); },
+        { enableHighAccuracy: true, timeout: 4000 }
+      );
+    } else {
+      onDone(fallbackCoords());
+    }
+  }
+
+  function updatePhotoPreviewUI() {
+    var $box = document.getElementById('photo-preview-box');
+    var $img = document.getElementById('photo-preview-img');
+    var $coords = document.getElementById('photo-gps-coords');
+    var $ts = document.getElementById('photo-timestamp-label');
+    var $badge = document.getElementById('photo-gps-badge');
+    if (!capturedPhotoData) {
+      $box.style.display = 'none';
+      return;
+    }
+    $box.style.display = 'flex';
+    if (capturedPhotoData.base64) {
+      $img.src = capturedPhotoData.base64;
+      $img.style.display = 'block';
+    } else {
+      $img.style.display = 'none';
+    }
+    $badge.textContent = '📍 GPS Coordinates Locked';
+    $coords.textContent = 'Lat: ' + Number(capturedPhotoData.lat).toFixed(5) + '°N · Lon: ' +
+      Number(capturedPhotoData.lon).toFixed(5) + '°E';
+    $ts.textContent = 'Captured: ' + new Date(capturedPhotoData.timestamp).toLocaleString('en-IN');
+  }
+
+  if ($photoInput) {
+    $photoInput.addEventListener('change', function() {
+      var file = $photoInput.files && $photoInput.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var b64 = ev.target.result;
+        lockGpsCoordinates(function(gps) {
+          capturedPhotoData = {
+            base64: b64,
+            filename: file.name,
+            lat: gps.lat,
+            lon: gps.lon,
+            timestamp: new Date().toISOString()
+          };
+          updatePhotoPreviewUI();
+          showToast('📷 Geotagged field photo locked (' + gps.source + ')', 'success');
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if ($lockGpsBtn) {
+    $lockGpsBtn.addEventListener('click', function() {
+      lockGpsCoordinates(function(gps) {
+        capturedPhotoData = capturedPhotoData || { base64: null, filename: null };
+        capturedPhotoData.lat = gps.lat;
+        capturedPhotoData.lon = gps.lon;
+        capturedPhotoData.timestamp = new Date().toISOString();
+        updatePhotoPreviewUI();
+        showToast('📍 GPS Coordinates Locked (' + gps.lat.toFixed(4) + ', ' + gps.lon.toFixed(4) + ')', 'success');
+      });
+    });
+  }
 
   // ── Bhoomi / Dishaank Cadastral Lookup ────────────────────────────────────
   var $cadTaluk = document.getElementById('cad-taluk');
@@ -344,11 +543,17 @@ function initUI() {
     }
 
     var farmerName  = document.getElementById('farmer-name').value.trim() || 'Tumakuru Farmer';
+    var phoneNumber = document.getElementById('farmer-phone') ? document.getElementById('farmer-phone').value.trim() : '';
     var cropType    = document.getElementById('crop-type').value;
     var taluk       = document.getElementById('taluk').value;
     var areaAcres   = parseFloat(document.getElementById('area-acres').value);
     var surveyNoEl  = document.getElementById('survey-no');
     var surveyNo    = surveyNoEl ? surveyNoEl.value.trim() : '';
+    var irrEl       = document.getElementById('irrigation-source');
+    var irrSource   = irrEl ? irrEl.value : 'Purely Rain-Fed';
+    var symptoms    = Array.from(document.querySelectorAll('.symptom-chip.active'))
+      .map(function(c) { return c.dataset.symptom; })
+      .filter(Boolean);
     var useFallback = document.getElementById('use-fallback').checked;
 
     var errors = [];
@@ -368,12 +573,20 @@ function initUI() {
 
     var payload = {
       farmer_name:         farmerName,
+      phone_number:        phoneNumber || null,
       crop_type:           cropType,
       taluk:               taluk,
       hobli:               selectedCadastral ? selectedCadastral.hobli : null,
       village:             selectedCadastral ? selectedCadastral.village : null,
       survey_no:           surveyNo || (selectedCadastral ? selectedCadastral.survey_no : null),
       area_acres:          areaAcres,
+      irrigation_source:   irrSource,
+      observed_symptoms:   symptoms,
+      photo_base64:        capturedPhotoData && capturedPhotoData.base64 ? capturedPhotoData.base64 : null,
+      photo_filename:      capturedPhotoData && capturedPhotoData.filename ? capturedPhotoData.filename : null,
+      photo_lat:           capturedPhotoData && capturedPhotoData.lat != null ? capturedPhotoData.lat : null,
+      photo_lon:           capturedPhotoData && capturedPhotoData.lon != null ? capturedPhotoData.lon : null,
+      photo_timestamp:     capturedPhotoData && capturedPhotoData.timestamp ? capturedPhotoData.timestamp : null,
       polygon_coordinates: drawnPolygon,
       use_fallback:        useFallback
     };
@@ -445,6 +658,10 @@ function initUI() {
 
   // ── Plots history page navigation ──────────────────────────────────────────
   document.getElementById('btn-view-plots').addEventListener('click', function() {
+    if (!officerToken) {
+      openOfficerLoginModal('history');
+      return;
+    }
     if (isHistoryOpen) {
       closeHistoryPage(true);
     } else {
@@ -464,7 +681,7 @@ function initUI() {
       closeHistoryPage(false);
     }
   });
-  if (window.location.hash === '#history') {
+  if (window.location.hash === '#history' && officerToken) {
     openHistoryPage(false);
   }
 
@@ -536,6 +753,10 @@ function initUI() {
 // ── Mode Switcher Logic ──────────────────────────────────────────────────────
 function setMode(mode) {
   if (mode !== 'farmer' && mode !== 'officer') return;
+  if (mode === 'officer' && !officerToken) {
+    openOfficerLoginModal('officer');
+    return;
+  }
   activeMode = mode;
   document.body.dataset.mode = mode;
 
@@ -556,8 +777,14 @@ function setMode(mode) {
   if ($regSection) {
     $regSection.style.display = mode === 'officer' ? 'block' : 'none';
   }
+  var $heatLegend = document.getElementById('regional-heatmap-legend');
+  if ($heatLegend) {
+    $heatLegend.style.display = mode === 'officer' ? 'flex' : 'none';
+  }
   if (mode === 'officer') {
     loadRegionalSummary(regionalTalukFilter);
+  } else if (regionalHeatLayer) {
+    regionalHeatLayer.clearLayers();
   }
 
   // Re-render charts cleanly when switching tabs after analysis
@@ -600,6 +827,38 @@ function renderResults(data) {
     var isHero = c.classList.contains('metric-card-hero');
     c.className = 'metric-card ' + (isHero ? 'metric-card-hero ' : '') + cls;
   });
+
+  // ── Farmer PMFBY Eligibility Pre-Check Card ────────────────────────────────
+  var $eligCard = document.getElementById('farmer-eligibility-card');
+  var $eligBadge = document.getElementById('farmer-eligibility-badge');
+  var $eligText = document.getElementById('farmer-eligibility-text');
+  var $farmerPdfLink = document.getElementById('farmer-pdf-receipt-link');
+  if ($eligCard && $eligBadge && $eligText) {
+    var eligStr = data.pmfby_eligible || (
+      drought.stage === 'severe_drought'
+        ? 'ELIGIBLE — Severe Moisture Deficit'
+        : (drought.stage === 'healthy' ? 'NOT ELIGIBLE — Normal Moisture' : 'WATCHLIST — Moderate Stress')
+    );
+    var eligClass = drought.stage === 'severe_drought'
+      ? 'eligible'
+      : (drought.stage === 'healthy' ? 'not-eligible' : 'watchlist');
+    $eligCard.className = 'card eligibility-card ' + eligClass;
+    $eligCard.style.display = 'block';
+    $eligBadge.textContent = eligStr;
+    $eligText.textContent = drought.stage === 'severe_drought'
+      ? 'Satellite NDMI & FAO-56 deficit cross severe PMFBY trigger thresholds. Download your SHA-256 receipt below.'
+      : (drought.stage === 'healthy'
+        ? 'Moisture indices are within normal bounds; follow standard irrigation coaching below.'
+        : 'Plot is under stress watchlist. Save your SHA-256 receipt and monitor weekly.');
+    if ($farmerPdfLink) {
+      if (data.pdf_download_url) {
+        $farmerPdfLink.href = data.pdf_download_url;
+        $farmerPdfLink.style.display = 'inline-flex';
+      } else {
+        $farmerPdfLink.style.display = 'none';
+      }
+    }
+  }
 
   // ── Farmer Water Coach fields ──────────────────────────────────────────────
   var vsurv = Number(hm.survival_liters || 0);
@@ -1030,7 +1289,7 @@ async function loadPlotsHistory() {
   var $container = document.getElementById('plots-list-container');
   $container.innerHTML = '<div class="empty-state"><p>Loading analysed plots…</p></div>';
   try {
-    var data = await fetchJSON('/api/plots');
+    var data = await authFetchJSON('/api/history');
     renderPlots(data);
   } catch (err) {
     $container.innerHTML =
@@ -1180,6 +1439,74 @@ function escHtml(str) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ── Officer Auth Helpers ─────────────────────────────────────────────────────
+function openOfficerLoginModal(nextAction) {
+  pendingOfficerAction = nextAction || 'officer';
+  var $modal = document.getElementById('modal-officer-login');
+  hideErrors(document.getElementById('officer-login-error'));
+  $modal.classList.add('open');
+  document.getElementById('officer-username').focus();
+}
+
+function updateOfficerBadgeUI() {
+  var $badge = document.getElementById('officer-auth-badge');
+  if ($badge) {
+    $badge.style.display = officerToken ? 'inline-flex' : 'none';
+  }
+}
+
+function clearOfficerSession() {
+  officerToken = '';
+  try { sessionStorage.removeItem('sookshmajal_officer_token'); } catch (e) {}
+  updateOfficerBadgeUI();
+  if (regionalHeatLayer) regionalHeatLayer.clearLayers();
+  if (isHistoryOpen) closeHistoryPage(true);
+  if (activeMode === 'officer') setMode('farmer');
+}
+
+async function authFetchJSON(url, options) {
+  var opts = Object.assign({}, options || {});
+  opts.headers = Object.assign({}, opts.headers || {}, {
+    Authorization: 'Bearer ' + officerToken
+  });
+  var res = await fetch(API_BASE + url, opts);
+  if (res.status === 401) {
+    clearOfficerSession();
+    openOfficerLoginModal(isHistoryOpen ? 'history' : 'officer');
+    throw new Error('Officer session required or expired.');
+  }
+  if (!res.ok) {
+    var detail = 'HTTP ' + res.status;
+    try { var body = await res.json(); detail = body.detail || JSON.stringify(body); } catch (e) {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+async function openOfficerPhotoPreview(plotId) {
+  var item = regionalPlots.find(function(p) { return p.plot_id === plotId; });
+  if (!item || !item.photo_url) return;
+  try {
+    var res = await fetch(item.photo_url, {
+      headers: { Authorization: 'Bearer ' + officerToken }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var blob = await res.blob();
+    var objUrl = URL.createObjectURL(blob);
+    var $img = document.getElementById('photo-modal-img');
+    $img.src = objUrl;
+    var gpsTxt = (item.photo_lat != null && item.photo_lon != null)
+      ? Number(item.photo_lat).toFixed(5) + '°N, ' + Number(item.photo_lon).toFixed(5) + '°E'
+      : 'Plot centroid';
+    document.getElementById('photo-modal-meta').textContent =
+      item.farmer_name + ' · GPS: ' + gpsTxt +
+      (item.photo_sha256 ? ' · Photo SHA-256: ' + item.photo_sha256.slice(0, 16) + '…' : '');
+    document.getElementById('modal-photo-preview').classList.add('open');
+  } catch (err) {
+    showToast('❌ Could not load field photo: ' + err.message, 'error');
+  }
+}
+
 // ── Regional Taluk Monitor (Insurance Claim Mode) ────────────────────────────
 var STAGE_LABELS = {
   healthy: 'Healthy',
@@ -1188,11 +1515,54 @@ var STAGE_LABELS = {
   severe_drought: 'Severe Drought'
 };
 
+function renderRegionalHeatmap(plots) {
+  if (!map || !regionalHeatLayer) return;
+  regionalHeatLayer.clearLayers();
+  if (activeMode !== 'officer' || !plots || plots.length === 0) return;
+
+  var bounds = [];
+  plots.forEach(function(p) {
+    var stage = p.drought_stage || 'healthy';
+    var color = stage === 'severe_drought'
+      ? '#dc2626'
+      : (stage === 'healthy' ? '#16a34a' : '#f59e0b');
+
+    var circle = L.circle([p.centroid_lat, p.centroid_lon], {
+      radius: 4500,
+      color: color,
+      weight: 1.5,
+      fillColor: color,
+      fillOpacity: 0.28
+    });
+    var surveyLabel = p.survey_no ? ('Sy. No. ' + escHtml(p.survey_no)) : 'Polygon';
+    circle.bindPopup(
+      '<strong>' + escHtml(p.farmer_name) + '</strong><br/>' +
+      escHtml(p.taluk) + ' (' + escHtml(p.district || 'Tumakuru') + ') · ' + surveyLabel + '<br/>' +
+      'Stage: <strong>' + escHtml(STAGE_LABELS[stage] || stage) + '</strong>'
+    );
+    circle.on('click', function() { selectRegionalPlot(p.plot_id, false); });
+    regionalHeatLayer.addLayer(circle);
+
+    if (p.polygon_coordinates && p.polygon_coordinates.length >= 4) {
+      var latlngs = p.polygon_coordinates.slice(0, -1).map(function(c) { return [c[1], c[0]]; });
+      var poly = L.polygon(latlngs, { color: color, weight: 2, fillColor: color, fillOpacity: 0.35 });
+      poly.on('click', function() { selectRegionalPlot(p.plot_id, false); });
+      regionalHeatLayer.addLayer(poly);
+    }
+    bounds.push([p.centroid_lat, p.centroid_lon]);
+  });
+
+  if (bounds.length > 0 && !selectedRegionalPlotId) {
+    map.fitBounds(bounds, { padding: [35, 35], maxZoom: 11 });
+    map.invalidateSize();
+  }
+}
+
 async function loadRegionalSummary(taluk) {
   var $tbody = document.getElementById('regional-table-body');
-  if (!$tbody) return;
+  if (!$tbody || !officerToken) return;
   try {
-    var data = await fetchJSON('/api/regional/summary?taluk=' + encodeURIComponent(taluk || 'ALL'));
+    var data = await authFetchJSON('/api/regional/summary?taluk=' + encodeURIComponent(taluk || 'ALL'));
     regionalPlots = data.plots || [];
 
     document.getElementById('reg-kpi-total').textContent = String(data.total_plots || 0);
@@ -1205,10 +1575,11 @@ async function loadRegionalSummary(taluk) {
     document.getElementById('reg-kpi-normal').textContent =
       (data.normal_count || 0) + ' healthy plots';
 
+    renderRegionalHeatmap(regionalPlots);
     renderRegionalTable(regionalPlots);
   } catch (err) {
     $tbody.innerHTML =
-      '<tr><td colspan="7" class="regional-empty" style="color:var(--color-3);">Failed to load regional plots: ' +
+      '<tr><td colspan="8" class="regional-empty" style="color:var(--color-3);">Failed to load regional plots: ' +
       escHtml(err.message) + '</td></tr>';
   }
 }
@@ -1217,7 +1588,7 @@ function renderRegionalTable(plots) {
   var $tbody = document.getElementById('regional-table-body');
   if (!plots || plots.length === 0) {
     $tbody.innerHTML =
-      '<tr><td colspan="7" class="regional-empty">No farmer plots recorded for this taluk yet.</td></tr>';
+      '<tr><td colspan="8" class="regional-empty">No farmer plots recorded for this region yet.</td></tr>';
     return;
   }
 
@@ -1225,25 +1596,30 @@ function renderRegionalTable(plots) {
     var stage = p.drought_stage || 'healthy';
     var cls = stageClass(stage);
     var stageText = STAGE_LABELS[stage] || stage.replace('_', ' ');
-    var ndviTxt = p.ndvi != null ? Number(p.ndvi).toFixed(2) : '—';
-    var ndmiTxt = p.ndmi != null ? Number(p.ndmi).toFixed(2) : '—';
     var vsurvTxt = p.survival_liters != null
       ? Math.round(Number(p.survival_liters)).toLocaleString('en-IN') + ' L'
       : '—';
     var isSel = selectedRegionalPlotId === p.plot_id;
+    var surveyTxt = p.survey_no
+      ? ('Sy. ' + escHtml(p.survey_no) + (p.village ? '<br/><span class="plot-row-meta">' + escHtml(p.village) + '</span>' : ''))
+      : (p.village ? escHtml(p.village) : '<span class="plot-row-meta">Custom polygon</span>');
 
-    var dossierCell = p.dossier_hash
-      ? '<span class="regional-hash-chip" title="' + escHtml(p.dossier_hash) + '">✅ ' +
-          escHtml(p.dossier_hash.slice(0, 10)) + '…</span>'
+    var photoCell = p.photo_url
+      ? '<button type="button" class="btn-secondary regional-row-btn" data-view-photo="' + escHtml(p.plot_id) + '">📷 GPS Locked</button>'
+      : '<span class="plot-row-meta">—</span>';
+
+    var dossierCell = p.pdf_download_url
+      ? '<a href="' + escHtml(p.pdf_download_url) + '" download class="btn-secondary regional-row-btn" data-pdf-dl="1" style="text-decoration:none;">⬇ Audit PDF</a>'
       : '<button type="button" class="btn-secondary regional-row-btn" data-generate-plot="' +
-          escHtml(p.plot_id) + '">📄 Generate PDF</button>';
+          escHtml(p.plot_id) + '">📄 Audit PDF</button>';
 
     return '<tr class="regional-row' + (isSel ? ' selected' : '') + '" data-plot-id="' + escHtml(p.plot_id) + '">' +
       '<td><strong>' + escHtml(p.farmer_name) + '</strong><br/>' +
-        '<span class="plot-row-meta">' + new Date(p.created_at).toLocaleDateString('en-IN') + '</span></td>' +
-      '<td>' + escHtml(p.taluk) + '</td>' +
+        '<span class="plot-row-meta">' + escHtml(p.phone_number || new Date(p.created_at).toLocaleDateString('en-IN')) + '</span></td>' +
+      '<td>' + escHtml(p.taluk) + '<br/><span class="plot-row-meta">' + escHtml(p.district || 'Tumakuru') + '</span></td>' +
+      '<td>' + surveyTxt + '</td>' +
       '<td>' + escHtml(p.crop_type) + ' · ' + Number(p.area_acres).toFixed(1) + ' ac</td>' +
-      '<td>' + ndviTxt + ' / ' + ndmiTxt + '</td>' +
+      '<td>' + photoCell + '</td>' +
       '<td><span class="drought-badge ' + cls + '" style="font-size:12px;padding:3px 10px;">' +
         escHtml(stageText) + '</span></td>' +
       '<td>' + vsurvTxt + '</td>' +
@@ -1253,9 +1629,20 @@ function renderRegionalTable(plots) {
 
   $tbody.querySelectorAll('.regional-row').forEach(function(row) {
     row.addEventListener('click', function(e) {
-      if (e.target && e.target.closest('[data-generate-plot]')) return;
+      if (e.target && (e.target.closest('[data-generate-plot]') || e.target.closest('[data-view-photo]') || e.target.closest('[data-pdf-dl]'))) return;
       selectRegionalPlot(row.dataset.plotId, false);
     });
+  });
+
+  $tbody.querySelectorAll('[data-view-photo]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openOfficerPhotoPreview(btn.dataset.viewPhoto);
+    });
+  });
+
+  $tbody.querySelectorAll('[data-pdf-dl]').forEach(function(a) {
+    a.addEventListener('click', function(e) { e.stopPropagation(); });
   });
 
   $tbody.querySelectorAll('[data-generate-plot]').forEach(function(btn) {
