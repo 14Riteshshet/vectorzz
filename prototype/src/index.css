@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Noto Sans Kannada', 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #f8faf7;
+    color: #0f172a;
+  }
+}
+
+@keyframes wavePulse {
+  0%, 100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.waveform-bar {
+  animation: wavePulse 0.9s ease-in-out infinite;
+  transform-origin: center;
+}

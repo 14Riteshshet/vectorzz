@@ -1,0 +1,148 @@
+import type { PlotRecord, ScenarioTelemetry, StressScenario } from '../types';
+
+export const SAMPLE_PLOTS: PlotRecord[] = [
+  {
+    id: 'gubbi-142-3',
+    surveyNo: 'Sy. No. 142/3',
+    ulpin: 'KA-2904-1423-8891',
+    taluk: 'Gubbi',
+    hobli: 'Gubbi Kasaba',
+    village: 'Nittur',
+    district: 'Tumakuru',
+    crop: 'Ragi (Finger Millet)',
+    cropKn: 'ರಾಗಿ',
+    areaAcres: 2.5,
+    farmerName: 'Ramaiah Gowda',
+    farmerNameKn: 'ರಾಮಯ್ಯ ಗೌಡ',
+    gpsLat: 13.3129,
+    gpsLon: 77.1011,
+    sumInsuredInr: 112500,
+    farmerPremiumInr: 2250,
+    govtSubsidyInr: 9000,
+    insurerName: 'Agriculture Insurance Company of India (AIC)',
+    insurerShort: 'AIC · PMFBY + YES-TECH',
+    blockOfficer: 'Sri Basavaraju K. (Block Agriculture Officer, Gubbi)',
+    blockOfficerPhone: '08131-222410',
+    notifiedSeason: 'Kharif 2026',
+    aadhaarBankLinked: true,
+  },
+  {
+    id: 'koratagere-88-1',
+    surveyNo: 'Sy. No. 88/1',
+    ulpin: 'KA-2907-8801-4412',
+    taluk: 'Koratagere',
+    hobli: 'Koratagere Kasaba',
+    village: 'Kolala',
+    district: 'Tumakuru',
+    crop: 'Groundnut',
+    cropKn: 'ಶೇಂಗಾ',
+    areaAcres: 2.5,
+    farmerName: 'Basavaraju N.',
+    farmerNameKn: 'ಬಸವರಾಜು ಎನ್.',
+    gpsLat: 13.5225,
+    gpsLon: 77.2365,
+    sumInsuredInr: 112500,
+    farmerPremiumInr: 2250,
+    govtSubsidyInr: 9000,
+    insurerName: 'Agriculture Insurance Company of India (AIC)',
+    insurerShort: 'AIC · PMFBY + YES-TECH',
+    blockOfficer: 'Smt. Kavitha R. (Block Agriculture Officer, Koratagere)',
+    blockOfficerPhone: '08138-232118',
+    notifiedSeason: 'Kharif 2026',
+    aadhaarBankLinked: true,
+  },
+  {
+    id: 'gubbi-areca-54',
+    surveyNo: 'Sy. No. 54/2',
+    ulpin: 'KA-2904-5402-7720',
+    taluk: 'Gubbi',
+    hobli: 'Chelur',
+    village: 'Chelur',
+    district: 'Tumakuru',
+    crop: 'Arecanut',
+    cropKn: 'ಅಡಿಕೆ',
+    areaAcres: 2.5,
+    farmerName: 'Siddalingappa M.',
+    farmerNameKn: 'ಸಿದ್ದಲಿಂಗಪ್ಪ ಎಂ.',
+    gpsLat: 13.3185,
+    gpsLon: 76.9512,
+    sumInsuredInr: 112500,
+    farmerPremiumInr: 2250,
+    govtSubsidyInr: 9000,
+    insurerName: 'Agriculture Insurance Company of India (AIC)',
+    insurerShort: 'AIC · PMFBY + YES-TECH',
+    blockOfficer: 'Sri Basavaraju K. (Block Agriculture Officer, Gubbi)',
+    blockOfficerPhone: '08131-222410',
+    notifiedSeason: 'Kharif 2026',
+    aadhaarBankLinked: true,
+  },
+];
+
+export const SCENARIO_DATA: Record<StressScenario, ScenarioTelemetry> = {
+  normal: {
+    id: 'normal',
+    labelEn: 'Normal Moisture (Healthy)',
+    labelKn: 'ಸಾಮಾನ್ಯ ತೇವಾಂಶ (ಆರೋಗ್ಯಕರ)',
+    ndmi: 0.14,
+    soilMoisturePct: 64,
+    et0MmDay: 4.1,
+    actionEn:
+      'Skip irrigation for 48 hours — root zone moisture is optimal. Saves ~14,000 L water.',
+    actionKn:
+      'ಮುಂದಿನ 48 ಗಂಟೆ ನೀರು ಹಾಯಿಸುವುದು ಬೇಡ — ಬೇರಿನ ವಲಯದಲ್ಲಿ ತೇವಾಂಶ ಸಮರ್ಪಕವಾಗಿದೆ. ಸುಮಾರು 14,000 ಲೀಟರ್ ನೀರು ಉಳಿತಾಯ.',
+    kannadaTranscript:
+      'ನಮಸ್ಕಾರ ರೈತ ಬಾಂಧವರೇ. ನಿಮ್ಮ 2.5 ಎಕರೆ ಜಮೀನಿನಲ್ಲಿ ತೇವಾಂಶ ಉತ್ತಮವಾಗಿದೆ. ಮುಂದಿನ 48 ಗಂಟೆ ನೀರು ಹಾಯಿಸುವುದು ಬೇಡ. ಇದರಿಂದ ಸುಮಾರು 14,000 ಲೀಟರ್ ನೀರು ಉಳಿತಾಯವಾಗುತ್ತದೆ.',
+    diagnosisTitleEn: 'Optimal Canopy & Moisture — Check Drip Emitter Pressure',
+    diagnosisTitleKn: 'ಬೆಳೆ ಆರೋಗ್ಯಕರವಾಗಿದೆ — ಹನಿ ನೀರಾವರಿ ಒತ್ತಡ ಪರಿಶೀಲಿಸಿ',
+    diagnosisDetailEn:
+      'Early leaf-tip check normal; root-zone moisture optimal (64%). Fungal risk low. Skip next irrigation cycle.',
+    diagnosisDetailKn:
+      'ಎಲೆಗಳ ತುದಿ ಒತ್ತಡ ಕಡಿಮೆ ಇದೆ; ಬೇರಿನ ತೇವಾಂಶ ಉತ್ತಮವಾಗಿದೆ (64%). ಶಿಲೀಂಧ್ರ ರೋಗದ ಅಪಾಯ ಕಡಿಮೆ.',
+    thresholdCrossed: false,
+    payoutInr: 0,
+  },
+  drought: {
+    id: 'drought',
+    labelEn: 'Severe Drought Stress (NDMI -0.18)',
+    labelKn: 'ತೀವ್ರ ಬರ ಒತ್ತಡ (NDMI -0.18)',
+    ndmi: -0.18,
+    soilMoisturePct: 19,
+    et0MmDay: 5.9,
+    actionEn:
+      'Apply 18,500 L survival irrigation to root zone within 24 hours. Severe moisture deficit logged for PMFBY.',
+    actionKn:
+      '24 ಗಂಟೆಯೊಳಗೆ ಬೇರಿಗೆ 18,500 ಲೀಟರ್ ಜೀವ ರಕ್ಷಕ ನೀರು ಹಾಯಿಸಿ. PMFBY ಬೆಳೆ ನಷ್ಟ ಪರಿಶೀಲನೆಗೆ ತೀವ್ರ ಬರ ದಾಖಲಾಗಿದೆ.',
+    kannadaTranscript:
+      'ಎಚ್ಚರಿಕೆ! ನಿಮ್ಮ ಹೊಲದಲ್ಲಿ ತೀವ್ರ ತೇವಾಂಶ ಕೊರತೆ ಕಂಡುಬಂದಿದೆ. ತಕ್ಷಣ ಬೇರಿಗೆ 18,500 ಲೀಟರ್ ನೀರು ಹಾಯಿಸಿ. ನಿಮ್ಮ ಬೆಳೆ ವಿಮೆ ದಾವೆ ಪರಿಶೀಲನೆ ಸ್ವಯಂಚಾಲಿತವಾಗಿ ಆರಂಭವಾಗಿದೆ.',
+    diagnosisTitleEn: 'Severe Dry-Spell Leaf Rolling Detected — PMFBY Triggered',
+    diagnosisTitleKn: 'ತೀವ್ರ ಒಣಹವೆ ಎಲೆ ಸುರುಳಿ ಪತ್ತೆಯಾಗಿದೆ — PMFBY ದಾವೆ ಸಕ್ರಿಯ',
+    diagnosisDetailEn:
+      'Early leaf-tip stress & soil cracking detected; NDMI (-0.18) confirms moisture deficit. Fungal risk low; claim dossier queued.',
+    diagnosisDetailKn:
+      'ಮಣ್ಣಿನ ಬಿರುಕು ಮತ್ತು ಎಲೆ ಬಾಡುವಿಕೆ ಪತ್ತೆಯಾಗಿದೆ; ಉಪಗ್ರಹ NDMI (-0.18) ತೇವಾಂಶ ಕೊರತೆಯನ್ನು ದೃಢಪಡಿಸಿದೆ.',
+    thresholdCrossed: true,
+    payoutInr: 45000,
+  },
+  waterlogged: {
+    id: 'waterlogged',
+    labelEn: 'Severe Waterlogging (NDMI +0.42)',
+    labelKn: 'ತೀವ್ರ ಜಲಾವೃತ ಒತ್ತಡ (NDMI +0.42)',
+    ndmi: 0.42,
+    soilMoisturePct: 92,
+    et0MmDay: 3.2,
+    actionEn:
+      'Halt all pumping & open field drainage bunds immediately. Excess inundation logged for localized PMFBY claim.',
+    actionKn:
+      'ತಕ್ಷಣ ನೀರು ಹಾಯಿಸುವುದು ನಿಲ್ಲಿಸಿ ಮತ್ತು ಬದುಗಳನ್ನು ತೆರೆದು ನೀರು ಹೊರಹಾಕಿ. ಅತಿಯಾದ ಜಲಾವೃತ ನಷ್ಟಕ್ಕೆ PMFBY ದಾವೆ ದಾಖಲಾಗಿದೆ.',
+    kannadaTranscript:
+      'ಎಚ್ಚರಿಕೆ! ನಿಮ್ಮ ಜಮೀನಿನಲ್ಲಿ ಅತಿಯಾದ ನೀರು ನಿಂತಿದೆ. ತಕ್ಷಣ ನೀರು ಹೊರಹೋಗಲು ಕಾಲುವೆ ತೆರೆಯಿರಿ. ಸ್ಥಳೀಯ ಬೆಳೆ ವಿಮೆ ದಾವೆಗಾಗಿ ಉಪಗ್ರಹ ಸಾಕ್ಷ್ಯ ದಾಖಲಾಗಿದೆ.',
+    diagnosisTitleEn: 'Root-Zone Waterlogging & Inundation — Localized Peril',
+    diagnosisTitleKn: 'ಬೇರಿನ ವಲಯದಲ್ಲಿ ಅತಿಯಾದ ನೀರು ನಿಂತಿದೆ — ಸ್ಥಳೀಯ ವಿಮೆ ವ್ಯಾಪ್ತಿ',
+    diagnosisDetailEn:
+      'Standing water reflectance (+0.42 NDMI) & yellowing lower leaves detected. Moderate fungal risk; 72-hr intimation logged.',
+    diagnosisDetailKn:
+      'ಹೊಲದಲ್ಲಿ ನಿಂತ ನೀರು (+0.42 NDMI) ಮತ್ತು ಕೆಳಗಿನ ಎಲೆ ಹಳದಿಯಾಗುವಿಕೆ ಕಂಡುಬಂದಿದೆ. 72 ಗಂಟೆಯೊಳಗಿನ ವರದಿ ದಾಖಲಾಗಿದೆ.',
+    thresholdCrossed: true,
+    payoutInr: 45000,
+  },
+};
