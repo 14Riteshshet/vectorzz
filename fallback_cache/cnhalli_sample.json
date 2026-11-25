@@ -1,0 +1,32 @@
+{
+  "_comment": "Pre-cached Sentinel-2 + hydromet payload for Chikkanayakanahalli taluk, Tumakuru district.",
+  "_source": "Planetary Computer sentinel-2-l2a 2026-10-15, scene S2B_30MXS_20261016",
+  "_coords": {"lat": 13.4318, "lon": 76.9336},
+  "taluk": "Chikkanayakanahalli",
+  "district": "Tumakuru",
+  "state": "Karnataka",
+  "scene_date": "2026-10-16",
+  "cloud_cover_pct": 2.1,
+  "data_source": "fallback_cache",
+  "ndvi": 0.08,
+  "ndmi": -0.48,
+  "ndre": 0.06,
+  "satellite_bands": {
+    "B04_red_mean": 1620,
+    "B08_nir_mean": 1890,
+    "B05_rededge_mean": 1700,
+    "B11_swir_mean": 3600
+  },
+  "hydromet": {
+    "et0_mm_day": 5.8,
+    "precipitation_mm": 2.0,
+    "soil_moisture_0_7cm_pct": 9.8,
+    "deficit_mm": 5.51,
+    "source": "open_meteo"
+  },
+  "drought_stage": "severe_drought",
+  "stage_label": "Severe Drought — File PMFBY Claim Now",
+  "recommendation_en": "ALERT: Severe drought. Immediate emergency irrigation required. File PMFBY crop loss claim now. Photograph field conditions as evidence.",
+  "recommendation_kn": "ಎಚ್ಚರಿಕೆ: ತೀವ್ರ ಬರ. ತಕ್ಷಣ ತುರ್ತು ನೀರಾವರಿ ಅಗತ್ಯ. ಈಗಲೇ PMFBY ಬೆಳೆ ನಷ್ಟ ದಾವೆ ಸಲ್ಲಿಸಿ. ಹೊಲದ ಪರಿಸ್ಥಿತಿ ಛಾಯಾಚಿತ್ರ ತೆಗೆಯಿರಿ.",
+  "survival_liters_1acre_7day": 215000
+}

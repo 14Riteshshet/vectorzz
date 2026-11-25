@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  # ── Backend (FastAPI + Uvicorn) ────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sookshmajal-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./sookshmajal.db}
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8000}
+      - APP_ENV=${APP_ENV:-development}
+    ports:
+      - "8000:8000"
+    volumes:
+      - sookshmajal_db:/app/sookshmajal.db
+      - sookshmajal_pdfs:/app/generated_pdfs
+      - ./fallback_cache:/app/fallback_cache:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - sookshmajal_net
+
+volumes:
+  sookshmajal_db:
+    driver: local
+  sookshmajal_pdfs:
+    driver: local
+
+networks:
+  sookshmajal_net:
+    driver: bridge

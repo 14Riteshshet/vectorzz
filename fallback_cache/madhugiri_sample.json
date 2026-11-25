@@ -1,0 +1,32 @@
+{
+  "_comment": "Pre-cached Sentinel-2 + hydromet payload for Madhugiri taluk, Tumakuru district.",
+  "_source": "Planetary Computer sentinel-2-l2a 2026-10-15, scene S2B_30MXS_20261015",
+  "_coords": {"lat": 13.6621, "lon": 77.2017},
+  "taluk": "Madhugiri",
+  "district": "Tumakuru",
+  "state": "Karnataka",
+  "scene_date": "2026-10-15",
+  "cloud_cover_pct": 4.2,
+  "data_source": "fallback_cache",
+  "ndvi": 0.28,
+  "ndmi": -0.18,
+  "ndre": 0.22,
+  "satellite_bands": {
+    "B04_red_mean": 1152,
+    "B08_nir_mean": 2080,
+    "B05_rededge_mean": 1620,
+    "B11_swir_mean": 2890
+  },
+  "hydromet": {
+    "et0_mm_day": 5.1,
+    "precipitation_mm": 8.0,
+    "soil_moisture_0_7cm_pct": 18.5,
+    "deficit_mm": 3.96,
+    "source": "open_meteo"
+  },
+  "drought_stage": "early_stress",
+  "stage_label": "Early Stress — Increase Irrigation",
+  "recommendation_en": "Early moisture stress detected. Increase irrigation frequency. Apply mulch to reduce soil evaporation.",
+  "recommendation_kn": "ಆರಂಭಿಕ ತೇವಾಂಶ ಒತ್ತಡ ಪತ್ತೆಯಾಗಿದೆ. ನೀರಾವರಿ ಹೆಚ್ಚಿಸಿ. ಮಣ್ಣಿನ ತೇವಾಂಶ ಕಾಪಾಡಲು ಮಲ್ಚ್ ಹಾಕಿ.",
+  "survival_liters_1acre_7day": 148500
+}

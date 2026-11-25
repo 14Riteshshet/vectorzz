@@ -1,0 +1,32 @@
+{
+  "_comment": "Pre-cached Sentinel-2 + hydromet payload for Koratagere taluk, Tumakuru district.",
+  "_source": "Planetary Computer sentinel-2-l2a 2026-10-15, scene S2A_30MXS_20261015",
+  "_coords": {"lat": 13.5225, "lon": 77.2365},
+  "taluk": "Koratagere",
+  "district": "Tumakuru",
+  "state": "Karnataka",
+  "scene_date": "2026-10-15",
+  "cloud_cover_pct": 6.8,
+  "data_source": "fallback_cache",
+  "ndvi": 0.19,
+  "ndmi": -0.31,
+  "ndre": 0.14,
+  "satellite_bands": {
+    "B04_red_mean": 1388,
+    "B08_nir_mean": 1920,
+    "B05_rededge_mean": 1580,
+    "B11_swir_mean": 3200
+  },
+  "hydromet": {
+    "et0_mm_day": 5.4,
+    "precipitation_mm": 5.5,
+    "soil_moisture_0_7cm_pct": 14.2,
+    "deficit_mm": 4.61,
+    "source": "open_meteo"
+  },
+  "drought_stage": "moderate_drought",
+  "stage_label": "Moderate Drought — Urgent Action Required",
+  "recommendation_en": "Moderate drought stress. Apply deficit irrigation immediately. Contact taluk agricultural officer. Begin PMFBY documentation.",
+  "recommendation_kn": "ಮಧ್ಯಮ ಬರ ಒತ್ತಡ. ತಕ್ಷಣ ನೀರಾವರಿ ಅಗತ್ಯ. ತಾಲ್ಲೂಕು ಕೃಷಿ ಅಧಿಕಾರಿಯನ್ನು ಸಂಪರ್ಕಿಸಿ. PMFBY ದಾಖಲಾತಿ ಪ್ರಾರಂಭಿಸಿ.",
+  "survival_liters_1acre_7day": 182000
+}
