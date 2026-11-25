@@ -132,6 +132,9 @@ def generate_pmfby_pdf(
     farmer = payload.get("farmer_name", "Unknown")
     crop = payload.get("crop_type", "Unknown")
     taluk = payload.get("taluk", "Unknown")
+    hobli = payload.get("hobli")
+    village = payload.get("village")
+    survey_no = payload.get("survey_no")
     area = payload.get("area_acres", 0.0)
     plot_id = payload.get("plot_id", "N/A")
     lat = payload.get("centroid_lat", 0.0)
@@ -217,13 +220,22 @@ def generate_pmfby_pdf(
         ["Farmer Name", farmer],
         ["Crop Type", crop],
         ["Taluk / District", f"{taluk} / Tumakuru, Karnataka"],
-        ["Plot Area", f"{area:.2f} acres"],
-        ["Plot ID", plot_id],
-        ["Centroid (Lat, Lon)", f"{lat:.6f}°N, {lon:.6f}°E"],
-        ["Sentinel-2 Scene Date", scene_date],
-        ["Cloud Cover", f"{cloud_cover:.1f}%"],
-        ["Data Source", data_source],
     ]
+    if village or hobli:
+        loc_parts = [p for p in [village, hobli] if p]
+        farm_data.append(["Village / Hobli", " / ".join(loc_parts)])
+    if survey_no:
+        farm_data.append(["Bhoomi Survey No.", str(survey_no)])
+    farm_data.extend(
+        [
+            ["Plot Area", f"{area:.2f} acres"],
+            ["Plot ID", plot_id],
+            ["Centroid (Lat, Lon)", f"{lat:.6f}°N, {lon:.6f}°E"],
+            ["Sentinel-2 Scene Date", scene_date],
+            ["Cloud Cover", f"{cloud_cover:.1f}%"],
+            ["Data Source", data_source],
+        ]
+    )
     farm_table = Table(farm_data, colWidths=[60 * mm, 110 * mm])
     farm_table.setStyle(
         TableStyle(

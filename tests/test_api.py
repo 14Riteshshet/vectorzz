@@ -493,3 +493,151 @@ async def test_drought_stage_healthy(async_client: AsyncClient):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
     assert resp.status_code == 200
     assert resp.json()["drought"]["stage"] == "healthy"
+
+
+# ── Regional Summary & Defaults Tests ─────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_regional_summary_all_and_filtered(async_client: AsyncClient):
+    """GET /api/regional/summary returns seeded KPIs and supports taluk filters."""
+    resp_all = await async_client.get("/api/regional/summary?taluk=ALL")
+    assert resp_all.status_code == 200, resp_all.text
+    data_all = resp_all.json()
+    assert data_all["total_plots"] >= 4
+    assert data_all["total_acres"] > 0
+    assert data_all["severe_count"] >= 1
+    assert data_all["moderate_count"] >= 1
+    assert data_all["normal_count"] >= 1
+    assert data_all["ready_for_audit_count"] >= 1
+    assert len(data_all["plots"]) == data_all["total_plots"]
+
+    first = data_all["plots"][0]
+    for field in [
+        "plot_id",
+        "farmer_name",
+        "taluk",
+        "crop_type",
+        "area_acres",
+        "drought_stage",
+        "ndvi",
+        "ndmi",
+        "survival_liters",
+        "created_at",
+        "dossier_hash",
+    ]:
+        assert field in first
+
+    resp_mad = await async_client.get("/api/regional/summary?taluk=Madhugiri")
+    assert resp_mad.status_code == 200
+    mad_plots = resp_mad.json()["plots"]
+    assert len(mad_plots) >= 1
+    assert all(p["taluk"] == "Madhugiri" for p in mad_plots)
+
+    resp_cn = await async_client.get("/api/regional/summary?taluk=C.N. Halli")
+    assert resp_cn.status_code == 200
+    cn_plots = resp_cn.json()["plots"]
+    assert len(cn_plots) >= 1
+    assert all(p["taluk"] == "Chikkanayakanahalli" for p in cn_plots)
+
+
+@pytest.mark.anyio
+async def test_analyze_plot_defaults_farmer_and_infers_taluk(async_client: AsyncClient):
+    """Omitting farmer_name and taluk defaults farmer_name and infers taluk from coords."""
+    payload = {
+        "crop_type": "Ragi",
+        "area_acres": 1.5,
+        "polygon_coordinates": VALID_POLYGON,
+        "use_fallback": True,
+    }
+    with (
+        patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", "f" * 64)),
+    ):
+        resp = await async_client.post("/api/analyze-plot", json=payload)
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["farmer_name"] == "Tumakuru Farmer"
+    assert data["taluk"] == "Madhugiri"
+
+
+# ── Bhoomi / Dishaank Cadastral Lookup Tests ──────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_cadastral_villages_and_parcel(async_client: AsyncClient):
+    """GET /api/cadastral/villages and /api/cadastral/parcel return valid Tumakuru parcels."""
+    resp_all = await async_client.get("/api/cadastral/villages")
+    assert resp_all.status_code == 200
+    all_data = resp_all.json()
+    assert len(all_data["villages"]) >= 9
+
+    resp_mad = await async_client.get("/api/cadastral/villages?taluk=Madhugiri")
+    assert resp_mad.status_code == 200
+    mad_data = resp_mad.json()
+    assert mad_data["taluk"] == "Madhugiri"
+    assert len(mad_data["villages"]) >= 3
+    assert all(v["taluk"] == "Madhugiri" for v in mad_data["villages"])
+
+    resp_cn = await async_client.get("/api/cadastral/villages?taluk=C.N. Halli")
+    assert resp_cn.status_code == 200
+    assert resp_cn.json()["taluk"] == "Chikkanayakanahalli"
+
+    resp_parcel = await async_client.get(
+        "/api/cadastral/parcel?taluk=Madhugiri&village=Kodigenahalli&survey_no=42/1"
+    )
+    assert resp_parcel.status_code == 200, resp_parcel.text
+    parcel = resp_parcel.json()
+    assert parcel["taluk"] == "Madhugiri"
+    assert parcel["hobli"] == "Kasaba"
+    assert parcel["village"] == "Kodigenahalli"
+    assert parcel["survey_no"] == "42/1"
+    assert parcel["acres"] > 0
+    assert parcel["soil_type"]
+    assert parcel["default_crop"]
+    assert len(parcel["coordinates"]) >= 4
+    assert parcel["geojson"]["geometry"]["type"] == "Polygon"
+
+    resp_missing = await async_client.get(
+        "/api/cadastral/parcel?taluk=Madhugiri&village=Kodigenahalli&survey_no=999/9"
+    )
+    assert resp_missing.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_analyze_plot_with_cadastral_metadata(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Survey number, village, and hobli persist and appear in analyze response & PDF."""
+    parcel_resp = await async_client.get(
+        "/api/cadastral/parcel?taluk=Koratagere&village=Kolala&survey_no=31/1"
+    )
+    parcel = parcel_resp.json()
+    payload = {
+        "farmer_name": "Nanjundappa",
+        "crop_type": parcel["default_crop"],
+        "taluk": parcel["taluk"],
+        "hobli": parcel["hobli"],
+        "village": parcel["village"],
+        "survey_no": parcel["survey_no"],
+        "area_acres": parcel["acres"],
+        "polygon_coordinates": parcel["coordinates"],
+        "use_fallback": True,
+    }
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)),
+        patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+    ):
+        resp = await async_client.post("/api/analyze-plot", json=payload)
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["village"] == "Kolala"
+    assert data["hobli"] == "Kasaba"
+    assert data["survey_no"] == "31/1"
+    assert data["pdf_sha256"] and len(data["pdf_sha256"]) == 64

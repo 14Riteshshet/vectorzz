@@ -37,8 +37,15 @@ class FarmPlot(Base):
     __tablename__ = "farm_plots"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    farmer_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    taluk: Mapped[str] = mapped_column(String(100), nullable=False)
+    farmer_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Tumakuru Farmer"
+    )
+    taluk: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="Tumakuru"
+    )
+    hobli: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    village: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    survey_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
     district: Mapped[str] = mapped_column(String(100), default="Tumakuru")
     crop_type: Mapped[str] = mapped_column(String(100), nullable=False)
     area_acres: Mapped[float] = mapped_column(Float, nullable=False)

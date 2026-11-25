@@ -1,0 +1,439 @@
+{
+  "district": "Tumakuru",
+  "state": "Karnataka",
+  "source": "Bhoomi / Dishaank Sample Cadastral Registry",
+  "parcels": [
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Kodigenahalli",
+      "survey_no": "42/1",
+      "acres": 2.4,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.1940, 13.6600],
+        [77.1972, 13.6600],
+        [77.1972, 13.6632],
+        [77.1940, 13.6632],
+        [77.1940, 13.6600]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Kodigenahalli",
+      "survey_no": "42/2",
+      "acres": 1.8,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.1975, 13.6602],
+        [77.2004, 13.6602],
+        [77.2004, 13.6629],
+        [77.1975, 13.6629],
+        [77.1975, 13.6602]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Kodigenahalli",
+      "survey_no": "108/2",
+      "acres": 3.2,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Maize",
+      "coordinates": [
+        [77.1945, 13.6636],
+        [77.1984, 13.6636],
+        [77.1984, 13.6670],
+        [77.1945, 13.6670],
+        [77.1945, 13.6636]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Byalya",
+      "survey_no": "19/3",
+      "acres": 2.1,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2030, 13.6540],
+        [77.2060, 13.6540],
+        [77.2060, 13.6570],
+        [77.2030, 13.6570],
+        [77.2030, 13.6540]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Byalya",
+      "survey_no": "27/1",
+      "acres": 2.7,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.2065, 13.6542],
+        [77.2098, 13.6542],
+        [77.2098, 13.6574],
+        [77.2065, 13.6574],
+        [77.2065, 13.6542]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Kasaba",
+      "village": "Byalya",
+      "survey_no": "64/4",
+      "acres": 1.5,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2035, 13.6578],
+        [77.2062, 13.6578],
+        [77.2062, 13.6604],
+        [77.2035, 13.6604],
+        [77.2035, 13.6578]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Midigeshi",
+      "village": "Midigeshi",
+      "survey_no": "15/2",
+      "acres": 3.0,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.2110, 13.6710],
+        [77.2146, 13.6710],
+        [77.2146, 13.6744],
+        [77.2110, 13.6744],
+        [77.2110, 13.6710]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Midigeshi",
+      "village": "Midigeshi",
+      "survey_no": "83/1",
+      "acres": 2.2,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2150, 13.6712],
+        [77.2180, 13.6712],
+        [77.2180, 13.6742],
+        [77.2150, 13.6742],
+        [77.2150, 13.6712]
+      ]
+    },
+    {
+      "taluk": "Madhugiri",
+      "hobli": "Midigeshi",
+      "village": "Midigeshi",
+      "survey_no": "112/3",
+      "acres": 4.0,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Maize",
+      "coordinates": [
+        [77.2115, 13.6748],
+        [77.2158, 13.6748],
+        [77.2158, 13.6788],
+        [77.2115, 13.6788],
+        [77.2115, 13.6748]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Kolala",
+      "survey_no": "31/1",
+      "acres": 2.0,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.2310, 13.5190],
+        [77.2340, 13.5190],
+        [77.2340, 13.5220],
+        [77.2310, 13.5220],
+        [77.2310, 13.5190]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Kolala",
+      "survey_no": "31/4",
+      "acres": 2.6,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2345, 13.5192],
+        [77.2378, 13.5192],
+        [77.2378, 13.5224],
+        [77.2345, 13.5224],
+        [77.2345, 13.5192]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Kolala",
+      "survey_no": "76/2",
+      "acres": 1.6,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Maize",
+      "coordinates": [
+        [77.2314, 13.5226],
+        [77.2342, 13.5226],
+        [77.2342, 13.5252],
+        [77.2314, 13.5252],
+        [77.2314, 13.5226]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Holavanahalli",
+      "survey_no": "14/2",
+      "acres": 2.3,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2410, 13.5260],
+        [77.2442, 13.5260],
+        [77.2442, 13.5290],
+        [77.2410, 13.5290],
+        [77.2410, 13.5260]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Holavanahalli",
+      "survey_no": "58/1",
+      "acres": 3.5,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.2446, 13.5262],
+        [77.2484, 13.5262],
+        [77.2484, 13.5298],
+        [77.2446, 13.5298],
+        [77.2446, 13.5262]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Kasaba",
+      "village": "Holavanahalli",
+      "survey_no": "92/3",
+      "acres": 1.9,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2412, 13.5295],
+        [77.2441, 13.5295],
+        [77.2441, 13.5322],
+        [77.2412, 13.5322],
+        [77.2412, 13.5295]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Channarayadurga",
+      "village": "Thovinakere",
+      "survey_no": "21/1",
+      "acres": 2.8,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Maize",
+      "coordinates": [
+        [77.2210, 13.5110],
+        [77.2244, 13.5110],
+        [77.2244, 13.5142],
+        [77.2210, 13.5142],
+        [77.2210, 13.5110]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Channarayadurga",
+      "village": "Thovinakere",
+      "survey_no": "49/2",
+      "acres": 2.1,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [77.2248, 13.5112],
+        [77.2279, 13.5112],
+        [77.2279, 13.5141],
+        [77.2248, 13.5141],
+        [77.2248, 13.5112]
+      ]
+    },
+    {
+      "taluk": "Koratagere",
+      "hobli": "Channarayadurga",
+      "village": "Thovinakere",
+      "survey_no": "104/1",
+      "acres": 3.1,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [77.2214, 13.5146],
+        [77.2250, 13.5146],
+        [77.2250, 13.5180],
+        [77.2214, 13.5180],
+        [77.2214, 13.5146]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Huliyar",
+      "survey_no": "11/2",
+      "acres": 3.0,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [76.9280, 13.4280],
+        [76.9316, 13.4280],
+        [76.9316, 13.4314],
+        [76.9280, 13.4314],
+        [76.9280, 13.4280]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Huliyar",
+      "survey_no": "44/3",
+      "acres": 2.4,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Maize",
+      "coordinates": [
+        [76.9320, 13.4282],
+        [76.9352, 13.4282],
+        [76.9352, 13.4313],
+        [76.9320, 13.4313],
+        [76.9320, 13.4282]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Huliyar",
+      "survey_no": "89/1",
+      "acres": 1.7,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [76.9284, 13.4318],
+        [76.9312, 13.4318],
+        [76.9312, 13.4345],
+        [76.9284, 13.4345],
+        [76.9284, 13.4318]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Shettikere",
+      "survey_no": "23/1",
+      "acres": 2.5,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [76.9380, 13.4330],
+        [76.9412, 13.4330],
+        [76.9412, 13.4361],
+        [76.9380, 13.4361],
+        [76.9380, 13.4330]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Shettikere",
+      "survey_no": "67/2",
+      "acres": 3.4,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Maize",
+      "coordinates": [
+        [76.9416, 13.4332],
+        [76.9454, 13.4332],
+        [76.9454, 13.4368],
+        [76.9416, 13.4368],
+        [76.9416, 13.4332]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kasaba",
+      "village": "Shettikere",
+      "survey_no": "101/4",
+      "acres": 2.0,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [76.9384, 13.4365],
+        [76.9414, 13.4365],
+        [76.9414, 13.4394],
+        [76.9384, 13.4394],
+        [76.9384, 13.4365]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kandikere",
+      "village": "Handanakere",
+      "survey_no": "18/2",
+      "acres": 2.9,
+      "soil_type": "Shallow Red Loam",
+      "default_crop": "Ragi",
+      "coordinates": [
+        [76.9190, 13.4210],
+        [76.9225, 13.4210],
+        [76.9225, 13.4244],
+        [76.9190, 13.4244],
+        [76.9190, 13.4210]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kandikere",
+      "village": "Handanakere",
+      "survey_no": "52/1",
+      "acres": 1.6,
+      "soil_type": "Red Sandy Loam",
+      "default_crop": "Groundnut",
+      "coordinates": [
+        [76.9229, 13.4212],
+        [76.9258, 13.4212],
+        [76.9258, 13.4240],
+        [76.9229, 13.4240],
+        [76.9229, 13.4212]
+      ]
+    },
+    {
+      "taluk": "Chikkanayakanahalli",
+      "hobli": "Kandikere",
+      "village": "Handanakere",
+      "survey_no": "95/3",
+      "acres": 3.6,
+      "soil_type": "Gravelly Red Soil",
+      "default_crop": "Maize",
+      "coordinates": [
+        [76.9194, 13.4248],
+        [76.9234, 13.4248],
+        [76.9234, 13.4284],
+        [76.9194, 13.4284],
+        [76.9194, 13.4248]
+      ]
+    }
+  ]
+}

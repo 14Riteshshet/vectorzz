@@ -13,6 +13,7 @@ import logging
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -20,8 +21,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.config import get_settings
 from backend.database import get_db, init_db
@@ -36,6 +38,9 @@ from backend.satellite import fetch_sentinel2_indices, load_taluk_cache
 from backend.schemas import (
     AnalyzePlotRequest,
     AnalyzePlotResponse,
+    CadastralParcelResponse,
+    CadastralVillagesResponse,
+    CadastralVillageSummary,
     CropIrrigationGuidance,
     DroughtAssessment,
     GenerateDossierResponse,
@@ -43,6 +48,8 @@ from backend.schemas import (
     HydrometData,
     PlotsListResponse,
     PlotSummary,
+    RegionalPlotItem,
+    RegionalSummaryResponse,
     SatelliteIndices,
     TimeSeriesData,
     VerifyDossierResponse,
@@ -174,11 +181,22 @@ def _classify_drought(ndvi: float, ndmi: float) -> DroughtAssessment:
     )
 
 
-# ── Centroid helper ────────────────────────────────────────────────────────────
+# ── Centroid & Taluk helpers ───────────────────────────────────────────────────
 def _compute_centroid(coords: list[list[float]]) -> tuple[float, float]:
     lons = [c[0] for c in coords]
     lats = [c[1] for c in coords]
     return sum(lons) / len(lons), sum(lats) / len(lats)
+
+
+def _infer_taluk_from_coords(lat: float, lon: float) -> str:
+    """Infer Tumakuru taluk from plot centroid coordinates."""
+    if lon < 77.05:
+        return "Chikkanayakanahalli"
+    if lat >= 13.60:
+        return "Madhugiri"
+    if lat >= 13.45:
+        return "Koratagere"
+    return "Tumakuru"
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -213,7 +231,12 @@ async def analyze_plot(
     - Persists FarmPlot, TelemetryLog, ClaimDossier records
     """
     lon_c, lat_c = _compute_centroid(body.polygon_coordinates)
-    taluk_key = body.taluk.lower().replace(" ", "")
+    effective_taluk = (
+        body.taluk.strip()
+        if body.taluk and body.taluk.strip()
+        else _infer_taluk_from_coords(lat_c, lon_c)
+    )
+    taluk_key = effective_taluk.lower().replace(" ", "")
     taluk_cache = load_taluk_cache(
         settings.FALLBACK_CACHE_DIR,
         taluk_key,
@@ -312,7 +335,10 @@ async def analyze_plot(
     db_plot = FarmPlot(
         id=plot_id,
         farmer_name=body.farmer_name,
-        taluk=body.taluk,
+        taluk=effective_taluk,
+        hobli=body.hobli,
+        village=body.village,
+        survey_no=body.survey_no,
         crop_type=body.crop_type,
         area_acres=body.area_acres,
         polygon_geojson=geojson_str,
@@ -371,7 +397,10 @@ async def analyze_plot(
         "plot_id": plot_id,
         "farmer_name": body.farmer_name,
         "crop_type": body.crop_type,
-        "taluk": body.taluk,
+        "taluk": effective_taluk,
+        "hobli": body.hobli,
+        "village": body.village,
+        "survey_no": body.survey_no,
         "area_acres": body.area_acres,
         "centroid_lat": lat_c,
         "centroid_lon": lon_c,
@@ -412,7 +441,10 @@ async def analyze_plot(
     return AnalyzePlotResponse(
         plot_id=plot_id,
         farmer_name=body.farmer_name,
-        taluk=body.taluk,
+        taluk=effective_taluk,
+        hobli=body.hobli,
+        village=body.village,
+        survey_no=body.survey_no,
         crop_type=body.crop_type,
         area_acres=body.area_acres,
         centroid_lat=lat_c,
@@ -503,6 +535,140 @@ async def list_plots(db: DbSession):
     return PlotsListResponse(total=len(summaries), plots=summaries)
 
 
+def _extract_polygon_coords(polygon_geojson: str) -> list[list[float]]:
+    try:
+        parsed = json.loads(polygon_geojson)
+        coords = parsed.get("geometry", {}).get("coordinates", [[]])[0]
+        return coords if isinstance(coords, list) else []
+    except (ValueError, TypeError, IndexError):
+        return []
+
+
+@app.get(
+    "/api/regional/summary",
+    response_model=RegionalSummaryResponse,
+    tags=["Regional"],
+)
+async def regional_summary(
+    request: Request,
+    db: DbSession,
+    taluk: str = "ALL",
+):
+    """
+    Aggregate regional KPIs and all saved FarmPlot records for the Regional Officer view.
+    Supports filtering by taluk (e.g. 'ALL', 'Madhugiri', 'Koratagere', 'C.N. Halli').
+    """
+    taluk_clean = (taluk or "ALL").strip()
+    stmt = (
+        select(FarmPlot)
+        .options(
+            selectinload(FarmPlot.telemetry_logs),
+            selectinload(FarmPlot.claim_dossiers),
+        )
+        .order_by(FarmPlot.created_at.desc())
+    )
+    if taluk_clean.upper() != "ALL":
+        aliases = {
+            "c.n. halli": ["chikkanayakanahalli", "c.n. halli", "cn halli"],
+            "cn halli": ["chikkanayakanahalli", "c.n. halli", "cn halli"],
+            "chikkanayakanahalli": ["chikkanayakanahalli", "c.n. halli", "cn halli"],
+        }
+        accepted = aliases.get(taluk_clean.lower(), [taluk_clean.lower()])
+        stmt = stmt.where(func.lower(FarmPlot.taluk).in_(accepted))
+
+    result = await db.execute(stmt)
+    plots = result.scalars().all()
+
+    base_url = str(request.base_url).rstrip("/")
+    severe_count = 0
+    moderate_count = 0
+    normal_count = 0
+    ready_for_audit_count = 0
+    total_acres = 0.0
+    items: list[RegionalPlotItem] = []
+
+    for p in plots:
+        total_acres += float(p.area_acres or 0.0)
+        stage = p.drought_stage or "healthy"
+        if stage == "severe_drought":
+            severe_count += 1
+            ready_for_audit_count += 1
+        elif stage in ("moderate_drought", "early_stress"):
+            moderate_count += 1
+            if stage == "moderate_drought":
+                ready_for_audit_count += 1
+        else:
+            normal_count += 1
+
+        latest_telem = (
+            max(p.telemetry_logs, key=lambda t: t.recorded_at)
+            if p.telemetry_logs
+            else None
+        )
+        latest_dossier = (
+            max(p.claim_dossiers, key=lambda d: d.generated_at)
+            if p.claim_dossiers
+            else None
+        )
+
+        ts_raw = (
+            (latest_telem.extra_meta or {}).get("time_series")
+            if latest_telem
+            else None
+        )
+        ts_data = TimeSeriesData(**ts_raw) if isinstance(ts_raw, dict) else TimeSeriesData()
+
+        pdf_url = (
+            f"{base_url}/api/pdf/{Path(latest_dossier.pdf_path).name}"
+            if latest_dossier and latest_dossier.pdf_path
+            else None
+        )
+
+        items.append(
+            RegionalPlotItem(
+                plot_id=p.id,
+                farmer_name=p.farmer_name,
+                taluk=p.taluk,
+                hobli=p.hobli,
+                village=p.village,
+                survey_no=p.survey_no,
+                crop_type=p.crop_type,
+                area_acres=p.area_acres,
+                centroid_lat=p.centroid_lat,
+                centroid_lon=p.centroid_lon,
+                polygon_coordinates=_extract_polygon_coords(p.polygon_geojson),
+                ndvi=p.ndvi,
+                ndmi=p.ndmi,
+                ndre=p.ndre,
+                drought_stage=p.drought_stage,
+                survival_liters=latest_telem.survival_liters if latest_telem else None,
+                et0_mm_day=latest_telem.et0_mm_day if latest_telem else None,
+                precipitation_mm=latest_telem.precipitation_mm if latest_telem else None,
+                soil_moisture_0_7cm_pct=(
+                    latest_telem.soil_moisture_pct if latest_telem else None
+                ),
+                scene_date=latest_telem.scene_date if latest_telem else None,
+                data_source=latest_telem.data_source if latest_telem else "database",
+                created_at=p.created_at.isoformat(),
+                dossier_hash=latest_dossier.sha256_hash if latest_dossier else None,
+                pdf_download_url=pdf_url,
+                is_verified=bool(latest_dossier.is_verified) if latest_dossier else False,
+                time_series=ts_data,
+            )
+        )
+
+    return RegionalSummaryResponse(
+        taluk=taluk_clean,
+        total_plots=len(items),
+        total_acres=round(total_acres, 2),
+        severe_count=severe_count,
+        moderate_count=moderate_count,
+        normal_count=normal_count,
+        ready_for_audit_count=ready_for_audit_count,
+        plots=items,
+    )
+
+
 @app.post(
     "/api/plots/{plot_id}/dossier",
     response_model=GenerateDossierResponse,
@@ -578,6 +744,9 @@ async def generate_plot_dossier(
         "farmer_name": plot.farmer_name,
         "crop_type": plot.crop_type,
         "taluk": plot.taluk,
+        "hobli": plot.hobli,
+        "village": plot.village,
+        "survey_no": plot.survey_no,
         "area_acres": plot.area_acres,
         "centroid_lat": plot.centroid_lat,
         "centroid_lon": plot.centroid_lon,
@@ -640,6 +809,109 @@ async def generate_plot_dossier(
         generated_at=dossier_row.generated_at.isoformat(),
         verified_at=now_dt.isoformat(),
         message="PMFBY Audit Dossier generated and SHA-256 verified.",
+    )
+
+
+_CADASTRAL_DATA_PATH = Path(__file__).parent / "data" / "tumakuru_cadastral.json"
+
+_TALUK_ALIASES = {
+    "c.n. halli": "Chikkanayakanahalli",
+    "cn halli": "Chikkanayakanahalli",
+    "chikkanayakanahalli": "Chikkanayakanahalli",
+}
+
+
+@lru_cache(maxsize=1)
+def _load_cadastral_parcels() -> list[dict]:
+    if not _CADASTRAL_DATA_PATH.exists():
+        return []
+    with _CADASTRAL_DATA_PATH.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("parcels", [])
+
+
+def _canonical_taluk(taluk: str | None) -> str | None:
+    if not taluk or not taluk.strip():
+        return None
+    t = taluk.strip()
+    return _TALUK_ALIASES.get(t.lower(), t)
+
+
+@app.get(
+    "/api/cadastral/villages",
+    response_model=CadastralVillagesResponse,
+    tags=["Cadastral"],
+)
+async def list_cadastral_villages(taluk: str | None = None):
+    """Return available hoblis, villages, and survey numbers for a Tumakuru taluk."""
+    parcels = _load_cadastral_parcels()
+    canon_taluk = _canonical_taluk(taluk)
+    if canon_taluk and canon_taluk.upper() != "ALL":
+        parcels = [p for p in parcels if p["taluk"].lower() == canon_taluk.lower()]
+
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for p in parcels:
+        key = (p["taluk"], p["hobli"], p["village"])
+        grouped.setdefault(key, []).append(p["survey_no"])
+
+    villages = [
+        CadastralVillageSummary(
+            taluk=t,
+            hobli=h,
+            village=v,
+            survey_numbers=surveys,
+        )
+        for (t, h, v), surveys in grouped.items()
+    ]
+    return CadastralVillagesResponse(taluk=canon_taluk or "ALL", villages=villages)
+
+
+@app.get(
+    "/api/cadastral/parcel",
+    response_model=CadastralParcelResponse,
+    tags=["Cadastral"],
+)
+async def get_cadastral_parcel(taluk: str, village: str, survey_no: str):
+    """Return a Bhoomi/Dishaank cadastral parcel polygon and metadata."""
+    canon_taluk = _canonical_taluk(taluk) or taluk
+    parcels = _load_cadastral_parcels()
+    match = next(
+        (
+            p
+            for p in parcels
+            if p["taluk"].lower() == canon_taluk.lower()
+            and p["village"].lower() == village.strip().lower()
+            and p["survey_no"].lower() == survey_no.strip().lower()
+        ),
+        None,
+    )
+    if match is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Survey parcel '{survey_no}' not found in {village}, {canon_taluk}.",
+        )
+
+    return CadastralParcelResponse(
+        taluk=match["taluk"],
+        hobli=match["hobli"],
+        village=match["village"],
+        survey_no=match["survey_no"],
+        acres=match["acres"],
+        soil_type=match["soil_type"],
+        default_crop=match["default_crop"],
+        coordinates=match["coordinates"],
+        geojson={
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [match["coordinates"]]},
+            "properties": {
+                "taluk": match["taluk"],
+                "hobli": match["hobli"],
+                "village": match["village"],
+                "survey_no": match["survey_no"],
+                "acres": match["acres"],
+                "soil_type": match["soil_type"],
+            },
+        },
     )
 
 

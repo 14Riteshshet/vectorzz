@@ -63,6 +63,11 @@ var farmerChart = null;
 var officerChart = null;
 var map = null;
 var drawnItems = null;
+var regionalTalukFilter = 'ALL';
+var regionalPlots = [];
+var selectedRegionalPlotId = null;
+var cadastralVillagesCache = [];
+var selectedCadastral = null;
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 window.addEventListener('load', function() {
@@ -127,6 +132,9 @@ function initMap() {
       drawnItems.addLayer(e.layer);
       var geojson = e.layer.toGeoJSON();
       drawnPolygon = geojson.geometry.coordinates[0];
+      selectedCadastral = null;
+      var $cadMeta = document.getElementById('cad-parcel-meta');
+      if ($cadMeta) { $cadMeta.textContent = ''; $cadMeta.classList.remove('visible'); }
       var $fb = document.getElementById('use-fallback');
       if ($fb) $fb.checked = false;
       updatePolygonStatus(drawnPolygon.length - 1);
@@ -134,6 +142,7 @@ function initMap() {
 
     map.on(L.Draw.Event.DELETED, function() {
       drawnPolygon = null;
+      selectedCadastral = null;
       updatePolygonStatus(0);
     });
   } else {
@@ -159,6 +168,125 @@ function initUI() {
     });
   });
 
+  // ── Regional Taluk Filter Pills ────────────────────────────────────────────
+  document.querySelectorAll('.regional-pill').forEach(function(pill) {
+    pill.addEventListener('click', function() {
+      regionalTalukFilter = pill.dataset.regionalTaluk || 'ALL';
+      document.querySelectorAll('.regional-pill').forEach(function(p) {
+        var isActive = p === pill;
+        p.classList.toggle('active', isActive);
+        p.setAttribute('aria-pressed', String(isActive));
+      });
+      loadRegionalSummary(regionalTalukFilter);
+    });
+  });
+
+  // ── Bhoomi / Dishaank Cadastral Lookup ────────────────────────────────────
+  var $cadTaluk = document.getElementById('cad-taluk');
+  var $cadVillage = document.getElementById('cad-village');
+  var $cadSurvey = document.getElementById('cad-survey');
+  var $cadMeta = document.getElementById('cad-parcel-meta');
+
+  if ($cadTaluk && $cadVillage && $cadSurvey) {
+    $cadTaluk.addEventListener('change', async function() {
+      var talukVal = $cadTaluk.value;
+      $cadVillage.innerHTML = '<option value="">Select village…</option>';
+      $cadSurvey.innerHTML = '<option value="">Select survey…</option>';
+      $cadVillage.disabled = true;
+      $cadSurvey.disabled = true;
+      $cadMeta.textContent = '';
+      $cadMeta.classList.remove('visible');
+      selectedCadastral = null;
+      if (!talukVal) return;
+
+      try {
+        var data = await fetchJSON('/api/cadastral/villages?taluk=' + encodeURIComponent(talukVal));
+        cadastralVillagesCache = data.villages || [];
+        cadastralVillagesCache.forEach(function(v) {
+          var opt = document.createElement('option');
+          opt.value = v.village;
+          opt.textContent = v.village + ' (' + v.hobli + ' Hobli)';
+          $cadVillage.appendChild(opt);
+        });
+        $cadVillage.disabled = cadastralVillagesCache.length === 0;
+      } catch (err) {
+        showToast('❌ Failed to load villages: ' + err.message, 'error');
+      }
+    });
+
+    $cadVillage.addEventListener('change', function() {
+      var villageVal = $cadVillage.value;
+      $cadSurvey.innerHTML = '<option value="">Select survey…</option>';
+      $cadSurvey.disabled = true;
+      $cadMeta.textContent = '';
+      $cadMeta.classList.remove('visible');
+      selectedCadastral = null;
+      if (!villageVal) return;
+
+      var found = cadastralVillagesCache.find(function(v) { return v.village === villageVal; });
+      if (found && found.survey_numbers) {
+        found.survey_numbers.forEach(function(sn) {
+          var opt = document.createElement('option');
+          opt.value = sn;
+          opt.textContent = 'Sy. No. ' + sn;
+          $cadSurvey.appendChild(opt);
+        });
+        $cadSurvey.disabled = found.survey_numbers.length === 0;
+      }
+    });
+
+    $cadSurvey.addEventListener('change', async function() {
+      var talukVal = $cadTaluk.value;
+      var villageVal = $cadVillage.value;
+      var surveyVal = $cadSurvey.value;
+      if (!talukVal || !villageVal || !surveyVal) return;
+
+      try {
+        var parcel = await fetchJSON(
+          '/api/cadastral/parcel?taluk=' + encodeURIComponent(talukVal) +
+          '&village=' + encodeURIComponent(villageVal) +
+          '&survey_no=' + encodeURIComponent(surveyVal)
+        );
+
+        drawnPolygon = parcel.coordinates;
+        selectedCadastral = {
+          hobli: parcel.hobli,
+          village: parcel.village,
+          survey_no: parcel.survey_no
+        };
+
+        if (map && drawnItems && parcel.coordinates && parcel.coordinates.length >= 4) {
+          drawnItems.clearLayers();
+          var latlngs = parcel.coordinates.slice(0, -1).map(function(c) { return [c[1], c[0]]; });
+          var poly = L.polygon(latlngs, {
+            color: '#0066CC',
+            weight: 3,
+            fillColor: '#0066CC',
+            fillOpacity: 0.24
+          });
+          drawnItems.addLayer(poly);
+          map.fitBounds(poly.getBounds(), { padding: [28, 28] });
+          map.invalidateSize();
+          updatePolygonStatus(parcel.coordinates.length - 1);
+        }
+
+        document.getElementById('taluk').value = parcel.taluk;
+        document.getElementById('area-acres').value = parcel.acres;
+        document.getElementById('crop-type').value = parcel.default_crop;
+        var $surveyInput = document.getElementById('survey-no');
+        if ($surveyInput) $surveyInput.value = parcel.survey_no;
+
+        $cadMeta.textContent = '📍 ' + parcel.village + ' (' + parcel.hobli + ' Hobli) · Sy. No. ' +
+          parcel.survey_no + ' · ' + parcel.acres + ' ac · ' + parcel.soil_type;
+        $cadMeta.classList.add('visible');
+
+        showToast('🏛 Loaded Bhoomi Sy. No. ' + parcel.survey_no + ' (' + parcel.village + ')', 'success');
+      } catch (err) {
+        showToast('❌ Failed to load parcel: ' + err.message, 'error');
+      }
+    });
+  }
+
   // ── Taluk preset buttons ───────────────────────────────────────────────────
   document.querySelectorAll('.btn-preset').forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -167,6 +295,11 @@ function initUI() {
       if (!preset || !map) return;
 
       drawnItems.clearLayers();
+      selectedCadastral = null;
+      var $cadMeta = document.getElementById('cad-parcel-meta');
+      if ($cadMeta) { $cadMeta.textContent = ''; $cadMeta.classList.remove('visible'); }
+      var $surveyInput = document.getElementById('survey-no');
+      if ($surveyInput) $surveyInput.value = '';
 
       var coords = preset.polygon();
       drawnPolygon = coords;
@@ -210,14 +343,15 @@ function initUI() {
       return;
     }
 
-    var farmerName  = document.getElementById('farmer-name').value.trim();
+    var farmerName  = document.getElementById('farmer-name').value.trim() || 'Tumakuru Farmer';
     var cropType    = document.getElementById('crop-type').value;
     var taluk       = document.getElementById('taluk').value;
     var areaAcres   = parseFloat(document.getElementById('area-acres').value);
+    var surveyNoEl  = document.getElementById('survey-no');
+    var surveyNo    = surveyNoEl ? surveyNoEl.value.trim() : '';
     var useFallback = document.getElementById('use-fallback').checked;
 
     var errors = [];
-    if (!farmerName)   errors.push('Farmer Name is required.');
     if (!cropType)     errors.push('Crop Type is required.');
     if (!taluk)        errors.push('Taluk is required.');
     if (isNaN(areaAcres) || areaAcres < 0.1 || areaAcres > 50) {
@@ -236,6 +370,9 @@ function initUI() {
       farmer_name:         farmerName,
       crop_type:           cropType,
       taluk:               taluk,
+      hobli:               selectedCadastral ? selectedCadastral.hobli : null,
+      village:             selectedCadastral ? selectedCadastral.village : null,
+      survey_no:           surveyNo || (selectedCadastral ? selectedCadastral.survey_no : null),
       area_acres:          areaAcres,
       polygon_coordinates: drawnPolygon,
       use_fallback:        useFallback
@@ -249,9 +386,13 @@ function initUI() {
       });
 
       currentResult = res;
+      selectedRegionalPlotId = res.plot_id;
       renderResults(res);
       setButtonLoading($btnAnalyze, false);
       $results.classList.add('visible');
+      if (activeMode === 'officer') {
+        loadRegionalSummary(regionalTalukFilter);
+      }
       requestAnimationFrame(function() {
         $results.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -290,6 +431,9 @@ function initUI() {
 
       updateDossierUI(dossier.sha256_hash, dossier.pdf_download_url, verified.is_valid, dossier.plot_id, dossier.verified_at || dossier.generated_at);
       setButtonLoading($btn, false);
+      if (activeMode === 'officer') {
+        loadRegionalSummary(regionalTalukFilter);
+      }
       showToast('📄 PMFBY Audit Dossier generated & SHA-256 verified', 'success');
     } catch (err) {
       setButtonLoading($btn, false, true);
@@ -408,6 +552,13 @@ function setMode(mode) {
 
   document.getElementById('farmer-view').style.display = mode === 'farmer' ? 'block' : 'none';
   document.getElementById('officer-view').style.display = mode === 'officer' ? 'block' : 'none';
+  var $regSection = document.getElementById('regional-monitor-section');
+  if ($regSection) {
+    $regSection.style.display = mode === 'officer' ? 'block' : 'none';
+  }
+  if (mode === 'officer') {
+    loadRegionalSummary(regionalTalukFilter);
+  }
 
   // Re-render charts cleanly when switching tabs after analysis
   if (currentResult) {
@@ -1027,4 +1178,172 @@ function escHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Regional Taluk Monitor (Insurance Claim Mode) ────────────────────────────
+var STAGE_LABELS = {
+  healthy: 'Healthy',
+  early_stress: 'Early Stress',
+  moderate_drought: 'Moderate Drought',
+  severe_drought: 'Severe Drought'
+};
+
+async function loadRegionalSummary(taluk) {
+  var $tbody = document.getElementById('regional-table-body');
+  if (!$tbody) return;
+  try {
+    var data = await fetchJSON('/api/regional/summary?taluk=' + encodeURIComponent(taluk || 'ALL'));
+    regionalPlots = data.plots || [];
+
+    document.getElementById('reg-kpi-total').textContent = String(data.total_plots || 0);
+    document.getElementById('reg-kpi-acres').textContent =
+      Number(data.total_acres || 0).toFixed(1) + ' total acres';
+    document.getElementById('reg-kpi-severe').textContent = String(data.severe_count || 0);
+    document.getElementById('reg-kpi-moderate').textContent =
+      (data.moderate_count || 0) + ' moderate / early stress';
+    document.getElementById('reg-kpi-audit').textContent = String(data.ready_for_audit_count || 0);
+    document.getElementById('reg-kpi-normal').textContent =
+      (data.normal_count || 0) + ' healthy plots';
+
+    renderRegionalTable(regionalPlots);
+  } catch (err) {
+    $tbody.innerHTML =
+      '<tr><td colspan="7" class="regional-empty" style="color:var(--color-3);">Failed to load regional plots: ' +
+      escHtml(err.message) + '</td></tr>';
+  }
+}
+
+function renderRegionalTable(plots) {
+  var $tbody = document.getElementById('regional-table-body');
+  if (!plots || plots.length === 0) {
+    $tbody.innerHTML =
+      '<tr><td colspan="7" class="regional-empty">No farmer plots recorded for this taluk yet.</td></tr>';
+    return;
+  }
+
+  $tbody.innerHTML = plots.map(function(p) {
+    var stage = p.drought_stage || 'healthy';
+    var cls = stageClass(stage);
+    var stageText = STAGE_LABELS[stage] || stage.replace('_', ' ');
+    var ndviTxt = p.ndvi != null ? Number(p.ndvi).toFixed(2) : '—';
+    var ndmiTxt = p.ndmi != null ? Number(p.ndmi).toFixed(2) : '—';
+    var vsurvTxt = p.survival_liters != null
+      ? Math.round(Number(p.survival_liters)).toLocaleString('en-IN') + ' L'
+      : '—';
+    var isSel = selectedRegionalPlotId === p.plot_id;
+
+    var dossierCell = p.dossier_hash
+      ? '<span class="regional-hash-chip" title="' + escHtml(p.dossier_hash) + '">✅ ' +
+          escHtml(p.dossier_hash.slice(0, 10)) + '…</span>'
+      : '<button type="button" class="btn-secondary regional-row-btn" data-generate-plot="' +
+          escHtml(p.plot_id) + '">📄 Generate PDF</button>';
+
+    return '<tr class="regional-row' + (isSel ? ' selected' : '') + '" data-plot-id="' + escHtml(p.plot_id) + '">' +
+      '<td><strong>' + escHtml(p.farmer_name) + '</strong><br/>' +
+        '<span class="plot-row-meta">' + new Date(p.created_at).toLocaleDateString('en-IN') + '</span></td>' +
+      '<td>' + escHtml(p.taluk) + '</td>' +
+      '<td>' + escHtml(p.crop_type) + ' · ' + Number(p.area_acres).toFixed(1) + ' ac</td>' +
+      '<td>' + ndviTxt + ' / ' + ndmiTxt + '</td>' +
+      '<td><span class="drought-badge ' + cls + '" style="font-size:12px;padding:3px 10px;">' +
+        escHtml(stageText) + '</span></td>' +
+      '<td>' + vsurvTxt + '</td>' +
+      '<td>' + dossierCell + '</td>' +
+    '</tr>';
+  }).join('');
+
+  $tbody.querySelectorAll('.regional-row').forEach(function(row) {
+    row.addEventListener('click', function(e) {
+      if (e.target && e.target.closest('[data-generate-plot]')) return;
+      selectRegionalPlot(row.dataset.plotId, false);
+    });
+  });
+
+  $tbody.querySelectorAll('[data-generate-plot]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      selectRegionalPlot(btn.dataset.generatePlot, true);
+    });
+  });
+}
+
+async function selectRegionalPlot(plotId, triggerDossier) {
+  var item = regionalPlots.find(function(p) { return p.plot_id === plotId; });
+  if (!item) return;
+
+  selectedRegionalPlotId = plotId;
+  renderRegionalTable(regionalPlots);
+
+  // Draw polygon on Leaflet map
+  if (map && drawnItems && item.polygon_coordinates && item.polygon_coordinates.length >= 4) {
+    drawnItems.clearLayers();
+    drawnPolygon = item.polygon_coordinates;
+    var latlngs = item.polygon_coordinates.slice(0, -1).map(function(c) { return [c[1], c[0]]; });
+    var polyColor = item.drought_stage === 'severe_drought'
+      ? '#B64400'
+      : (item.drought_stage === 'healthy' ? '#0066CC' : '#FF791B');
+    var poly = L.polygon(latlngs, { color: polyColor, weight: 2.5, fillOpacity: 0.22 });
+    drawnItems.addLayer(poly);
+    map.fitBounds(poly.getBounds(), { padding: [24, 24] });
+    map.invalidateSize();
+    updatePolygonStatus(item.polygon_coordinates.length - 1);
+  }
+
+  var stage = item.drought_stage || 'healthy';
+  var stageLabel = (STAGE_LABELS[stage] || stage) + ' — Regional Audit View';
+  var et0 = item.et0_mm_day != null ? item.et0_mm_day : 4.8;
+  var precip = item.precipitation_mm != null ? item.precipitation_mm : 10.0;
+
+  currentResult = {
+    plot_id: item.plot_id,
+    farmer_name: item.farmer_name,
+    taluk: item.taluk,
+    crop_type: item.crop_type,
+    area_acres: item.area_acres,
+    centroid_lat: item.centroid_lat,
+    centroid_lon: item.centroid_lon,
+    satellite: {
+      ndvi: item.ndvi != null ? item.ndvi : 0.0,
+      ndmi: item.ndmi != null ? item.ndmi : 0.0,
+      ndre: item.ndre != null ? item.ndre : 0.0,
+      scene_date: item.scene_date || '2026-10-30',
+      cloud_cover_pct: 4.5,
+      data_source: item.data_source || 'database'
+    },
+    drought: {
+      stage: stage,
+      stage_label: stageLabel,
+      color_token: stage === 'severe_drought' ? 'color-3' : (stage === 'healthy' ? 'color-2' : 'color-5'),
+      ndmi_threshold: item.ndmi != null ? item.ndmi : 0.0,
+      ndvi_threshold: item.ndvi != null ? item.ndvi : 0.0,
+      recommendation_en: 'Regional audit loaded for ' + item.farmer_name + ' (' + item.taluk + ').',
+      recommendation_kn: ''
+    },
+    hydromet: {
+      et0_mm_day: et0,
+      precipitation_mm: precip,
+      soil_moisture_0_7cm_pct: item.soil_moisture_0_7cm_pct != null ? item.soil_moisture_0_7cm_pct : 18.0,
+      survival_liters: item.survival_liters != null ? item.survival_liters : 0.0,
+      deficit_mm: Math.max(0, et0 - precip / 7.0)
+    },
+    time_series: item.time_series || {},
+    irrigation_guidance: {},
+    audio_base64: null,
+    audio_source: 'text_only',
+    pdf_sha256: item.dossier_hash,
+    pdf_download_url: item.pdf_download_url,
+    analysed_at: item.created_at
+  };
+
+  renderResults(currentResult);
+  var $results = document.getElementById('results-section');
+  $results.classList.add('visible');
+
+  if (triggerDossier) {
+    document.getElementById('btn-generate-dossier').click();
+  } else {
+    showToast('📍 Loaded ' + item.farmer_name + ' (' + item.taluk + ') on map & audit chart', 'success');
+    requestAnimationFrame(function() {
+      document.getElementById('officer-view').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 }

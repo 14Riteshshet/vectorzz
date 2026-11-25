@@ -111,6 +111,66 @@
         </div>
       </section>
 
+      <!-- ── Regional Taluk Monitor (Insurance Claim Mode) ──────── -->
+      <section class="card regional-monitor-card" id="regional-monitor-section" aria-labelledby="regional-monitor-title" style="display:none;">
+        <div class="regional-header-row">
+          <div>
+            <h2 class="card-title" id="regional-monitor-title" style="margin-bottom:var(--space-1);">
+              <span class="icon" aria-hidden="true">🏛</span>
+              Regional Taluk Monitor
+            </h2>
+            <p class="card-subtitle" style="margin-bottom:0;">
+              Aggregated farmer plots across Tumakuru. Click any row to load its stress trajectory on the map and audit its PMFBY dossier.
+            </p>
+          </div>
+          <div class="regional-filter-pills" role="group" aria-label="Filter regional plots by taluk">
+            <button type="button" class="regional-pill active" data-regional-taluk="ALL" aria-pressed="true">All Taluks</button>
+            <button type="button" class="regional-pill" data-regional-taluk="Madhugiri" aria-pressed="false">Madhugiri</button>
+            <button type="button" class="regional-pill" data-regional-taluk="Koratagere" aria-pressed="false">Koratagere</button>
+            <button type="button" class="regional-pill" data-regional-taluk="C.N. Halli" aria-pressed="false">C.N. Halli</button>
+          </div>
+        </div>
+
+        <div class="regional-kpi-grid" role="list" aria-label="Regional summary counters">
+          <div class="regional-kpi-card" role="listitem">
+            <div class="metric-label">Total Farmers Monitored</div>
+            <div class="metric-value" id="reg-kpi-total">—</div>
+            <div class="metric-sub" id="reg-kpi-acres">0.0 total acres</div>
+          </div>
+          <div class="regional-kpi-card severe" role="listitem">
+            <div class="metric-label">Severe Stress Plots</div>
+            <div class="metric-value" id="reg-kpi-severe">—</div>
+            <div class="metric-sub" id="reg-kpi-moderate">0 moderate / early stress</div>
+          </div>
+          <div class="regional-kpi-card audit" role="listitem">
+            <div class="metric-label">Ready for PMFBY Audit</div>
+            <div class="metric-value" id="reg-kpi-audit">—</div>
+            <div class="metric-sub" id="reg-kpi-normal">0 healthy plots</div>
+          </div>
+        </div>
+
+        <div class="regional-table-wrap">
+          <table class="regional-table" aria-label="Regional farmer plots table">
+            <thead>
+              <tr>
+                <th>Farmer</th>
+                <th>Taluk</th>
+                <th>Crop &amp; Area</th>
+                <th>NDVI / NDMI</th>
+                <th>Drought Stage</th>
+                <th>V<sub>surv</sub></th>
+                <th>PMFBY Dossier</th>
+              </tr>
+            </thead>
+            <tbody id="regional-table-body">
+              <tr>
+                <td colspan="7" class="regional-empty">Loading regional plots…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ── Map Card ───────────────────────────────────────────── -->
       <section class="card" aria-labelledby="map-title">
         <h2 class="card-title" id="map-title">
@@ -118,8 +178,41 @@
           Draw Your Farm Plot
         </h2>
         <p class="card-subtitle">
-          Use the polygon tool (▱) on the map to outline your plot, or tap a Tumakuru taluk preset above.
+          Look up your land parcel by Survey No., tap a Tumakuru preset, or use the polygon tool (▱) on the map.
         </p>
+
+        <!-- Bhoomi / Dishaank Cadastral Lookup Bar -->
+        <div class="cadastral-bar" role="region" aria-label="Bhoomi Dishaank Survey Number Lookup">
+          <div class="cadastral-bar-title">
+            <span>🏛 Find Land by Survey No.</span>
+            <span class="cadastral-badge">Bhoomi / Dishaank Lookup</span>
+          </div>
+          <div class="cadastral-controls">
+            <div class="cadastral-field">
+              <label for="cad-taluk">Taluk</label>
+              <select id="cad-taluk" class="form-select">
+                <option value="" selected>Select taluk…</option>
+                <option value="Madhugiri">Madhugiri</option>
+                <option value="Koratagere">Koratagere</option>
+                <option value="Chikkanayakanahalli">C.N. Halli</option>
+              </select>
+            </div>
+            <div class="cadastral-field">
+              <label for="cad-village">Village</label>
+              <select id="cad-village" class="form-select" disabled>
+                <option value="">Select village…</option>
+              </select>
+            </div>
+            <div class="cadastral-field">
+              <label for="cad-survey">Survey No.</label>
+              <select id="cad-survey" class="form-select" disabled>
+                <option value="">Select survey…</option>
+              </select>
+            </div>
+          </div>
+          <div class="cadastral-meta" id="cad-parcel-meta"></div>
+        </div>
+
         <div id="map" role="application" aria-label="Leaflet map — draw your farm plot polygon"></div>
         <p id="polygon-status" role="status" aria-live="polite" class="polygon-status">
           No polygon drawn yet. Use the draw tool on the map or tap a preset.
@@ -203,6 +296,19 @@
                 required aria-required="true"
               />
               <span class="form-hint">Between 0.1 and 50 acres</span>
+            </div>
+
+            <!-- Survey Number (optional, auto-filled by Bhoomi lookup) -->
+            <div class="form-field">
+              <label class="form-label" for="survey-no">
+                Survey No. <span class="form-hint" style="display:inline;">(Optional)</span>
+              </label>
+              <input
+                class="form-input" id="survey-no" name="survey_no"
+                type="text"
+                placeholder="e.g. 42/1 (auto-filled from lookup)"
+                maxlength="50"
+              />
             </div>
           </div>
 

@@ -51,12 +51,17 @@ class AnalyzePlotRequest(BaseModel):
     polygon_coordinates: list of [lon, lat] pairs forming a closed ring.
     """
 
-    farmer_name: str = Field(..., min_length=2, max_length=255)
-    crop_type: str = Field(..., min_length=2, max_length=100)
-    taluk: str = Field(
-        ...,
-        description="Tumakuru taluk (Madhugiri, Koratagere, Chikkanayakanahalli, etc.)",
+    farmer_name: str = Field(
+        "Tumakuru Farmer", min_length=2, max_length=255
     )
+    crop_type: str = Field(..., min_length=2, max_length=100)
+    taluk: str | None = Field(
+        None,
+        description="Tumakuru taluk (Madhugiri, Koratagere, Chikkanayakanahalli, C.N. Halli, Tumakuru, etc.)",
+    )
+    hobli: str | None = Field(None, max_length=100, description="Optional revenue hobli")
+    village: str | None = Field(None, max_length=100, description="Optional revenue village")
+    survey_no: str | None = Field(None, max_length=50, description="Optional Bhoomi survey number")
     area_acres: float = Field(
         ..., ge=0.1, le=50.0, description="Plot area in acres (0.1–50)"
     )
@@ -83,25 +88,26 @@ class AnalyzePlotRequest(BaseModel):
         _validate_karnataka_coords(v)
         return v
 
+    @field_validator("farmer_name", mode="before")
+    @classmethod
+    def default_farmer_name(cls, v: Any) -> str:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "Tumakuru Farmer"
+        return str(v).strip()
+
     @field_validator("taluk")
     @classmethod
-    def validate_taluk(cls, v: str) -> str:
-        known = {
-            "Madhugiri",
-            "Koratagere",
-            "Chikkanayakanahalli",
-            "Tumakuru",
-            "Pavagada",
-            "Tiptur",
-            "Turuvekere",
-            "Kunigal",
-            "Sira",
-            "Gubbi",
+    def validate_taluk(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        aliases = {
+            "C.N. Halli": "Chikkanayakanahalli",
+            "CN Halli": "Chikkanayakanahalli",
         }
-        if v not in known:
-            # Allow any taluk but warn; don't reject
-            pass
-        return v
+        return aliases.get(v, v)
 
     def to_geojson_polygon(self) -> dict[str, Any]:
         return {
@@ -181,6 +187,9 @@ class AnalyzePlotResponse(BaseModel):
     plot_id: str
     farmer_name: str
     taluk: str
+    hobli: str | None = None
+    village: str | None = None
+    survey_no: str | None = None
     crop_type: str
     area_acres: float
     centroid_lat: float
@@ -225,6 +234,70 @@ class PlotSummary(BaseModel):
 class PlotsListResponse(BaseModel):
     total: int
     plots: list[PlotSummary]
+
+
+class RegionalPlotItem(BaseModel):
+    plot_id: str
+    farmer_name: str
+    taluk: str
+    hobli: str | None = None
+    village: str | None = None
+    survey_no: str | None = None
+    crop_type: str
+    area_acres: float
+    centroid_lat: float
+    centroid_lon: float
+    polygon_coordinates: list[list[float]] = Field(default_factory=list)
+    ndvi: float | None = None
+    ndmi: float | None = None
+    ndre: float | None = None
+    drought_stage: str | None = None
+    survival_liters: float | None = None
+    et0_mm_day: float | None = None
+    precipitation_mm: float | None = None
+    soil_moisture_0_7cm_pct: float | None = None
+    scene_date: str | None = None
+    data_source: str = "database"
+    created_at: str
+    dossier_hash: str | None = None
+    pdf_download_url: str | None = None
+    is_verified: bool = False
+    time_series: TimeSeriesData = Field(default_factory=TimeSeriesData)
+
+
+class RegionalSummaryResponse(BaseModel):
+    taluk: str
+    total_plots: int
+    total_acres: float
+    severe_count: int
+    moderate_count: int
+    normal_count: int
+    ready_for_audit_count: int
+    plots: list[RegionalPlotItem]
+
+
+class CadastralVillageSummary(BaseModel):
+    taluk: str
+    hobli: str
+    village: str
+    survey_numbers: list[str]
+
+
+class CadastralVillagesResponse(BaseModel):
+    taluk: str
+    villages: list[CadastralVillageSummary]
+
+
+class CadastralParcelResponse(BaseModel):
+    taluk: str
+    hobli: str
+    village: str
+    survey_no: str
+    acres: float
+    soil_type: str
+    default_crop: str
+    coordinates: list[list[float]]
+    geojson: dict[str, Any]
 
 
 class VerifyDossierResponse(BaseModel):
