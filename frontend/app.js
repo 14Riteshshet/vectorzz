@@ -36,7 +36,7 @@ var TALUK_PRESETS = {
 var MODE_COPY = {
   farmer: {
     title: 'Precision Survival Water Coaching<br />for Tumakuru Farmers',
-    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a spoken Kannada voice advisory.'
+    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a Kannada crop water advisory.'
   },
   officer: {
     title: 'Post-Harvest Drought Verification<br />&amp; PMFBY Claim Monitor',
@@ -291,19 +291,27 @@ function initUI() {
 
   var $photoInput = document.getElementById('field-photo-input');
   var $lockGpsBtn = document.getElementById('btn-lock-gps');
+  var $demoPlotBtn = document.getElementById('btn-demo-plot-gps');
+  var $demoMismatchBtn = document.getElementById('btn-demo-mismatch-gps');
+  var $clearGpsBtn = document.getElementById('btn-clear-gps');
 
-  function lockGpsCoordinates(onDone) {
-    var fallbackCoords = function() {
-      if (drawnPolygon && drawnPolygon.length) {
-        var lons = drawnPolygon.map(function(c) { return c[0]; });
-        var lats = drawnPolygon.map(function(c) { return c[1]; });
-        var avgLat = lats.reduce(function(a, b) { return a + b; }, 0) / lats.length;
-        var avgLon = lons.reduce(function(a, b) { return a + b; }, 0) / lons.length;
-        return { lat: avgLat, lon: avgLon, source: 'plot centroid' };
-      }
-      return { lat: 13.5300, lon: 77.1200, source: 'Tumakuru default' };
-    };
+  function getPlotCenterFallback() {
+    if (drawnPolygon && drawnPolygon.length) {
+      var lons = drawnPolygon.map(function(c) { return c[0]; });
+      var lats = drawnPolygon.map(function(c) { return c[1]; });
+      return {
+        lat: lats.reduce(function(a, b) { return a + b; }, 0) / lats.length,
+        lon: lons.reduce(function(a, b) { return a + b; }, 0) / lons.length
+      };
+    }
+    var talukVal = document.getElementById('taluk') ? document.getElementById('taluk').value : '';
+    if (talukVal && TALUK_PRESETS[talukVal]) {
+      return { lat: TALUK_PRESETS[talukVal].center[0], lon: TALUK_PRESETS[talukVal].center[1] };
+    }
+    return { lat: 13.6621, lon: 77.2017 };
+  }
 
+  function lockDeviceGps(onDone) {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         function(pos) {
@@ -313,11 +321,13 @@ function initUI() {
             source: 'device GPS'
           });
         },
-        function() { onDone(fallbackCoords()); },
+        function() {
+          onDone({ lat: null, lon: null, source: 'unavailable' });
+        },
         { enableHighAccuracy: true, timeout: 4000 }
       );
     } else {
-      onDone(fallbackCoords());
+      onDone({ lat: null, lon: null, source: 'unavailable' });
     }
   }
 
@@ -327,6 +337,7 @@ function initUI() {
     var $coords = document.getElementById('photo-gps-coords');
     var $ts = document.getElementById('photo-timestamp-label');
     var $badge = document.getElementById('photo-gps-badge');
+    var $ev = document.getElementById('photo-evidence-status');
     if (!capturedPhotoData) {
       $box.style.display = 'none';
       return;
@@ -338,10 +349,26 @@ function initUI() {
     } else {
       $img.style.display = 'none';
     }
-    $badge.textContent = '📍 GPS Coordinates Locked';
-    $coords.textContent = 'Lat: ' + Number(capturedPhotoData.lat).toFixed(5) + '°N · Lon: ' +
-      Number(capturedPhotoData.lon).toFixed(5) + '°E';
-    $ts.textContent = 'Captured: ' + new Date(capturedPhotoData.timestamp).toLocaleString('en-IN');
+    var hasGps = capturedPhotoData.lat != null && capturedPhotoData.lon != null;
+    if ($ev) {
+      $ev.textContent = capturedPhotoData.base64
+        ? '📷 Real camera photo attached (' + escHtml(capturedPhotoData.filename || 'photo') + ')'
+        : '🧪 No camera photo attached (GPS simulation / coordinates only)';
+    }
+    if (hasGps) {
+      $badge.className = 'geolock-pill ' + (capturedPhotoData.isMismatchDemo ? 'outside' : 'verified');
+      $badge.textContent = capturedPhotoData.isMismatchDemo
+        ? '🏙 Simulated Far/City GPS (Expect OUTSIDE_REGION)'
+        : '📍 GPS Coordinates Locked';
+      $coords.textContent = 'Lat: ' + Number(capturedPhotoData.lat).toFixed(5) + '°N · Lon: ' +
+        Number(capturedPhotoData.lon).toFixed(5) + '°E';
+      $ts.textContent = 'Timestamp: ' + new Date(capturedPhotoData.timestamp).toLocaleString('en-IN');
+    } else {
+      $badge.className = 'geolock-pill missing';
+      $badge.textContent = '⚠ MISSING_GPS — Device GPS unavailable (will check photo EXIF or mark MISSING_GPS)';
+      $coords.textContent = 'Lat: — · Lon: —';
+      $ts.textContent = 'Tip: Use "Use Plot Coordinates as GPS" for city/laptop demos.';
+    }
   }
 
   if ($photoInput) {
@@ -351,17 +378,38 @@ function initUI() {
       var reader = new FileReader();
       reader.onload = function(ev) {
         var b64 = ev.target.result;
-        lockGpsCoordinates(function(gps) {
-          capturedPhotoData = {
-            base64: b64,
-            filename: file.name,
-            lat: gps.lat,
-            lon: gps.lon,
-            timestamp: new Date().toISOString()
-          };
-          updatePhotoPreviewUI();
-          showToast('📷 Geotagged field photo locked (' + gps.source + ')', 'success');
-        });
+        var existingLat = capturedPhotoData ? capturedPhotoData.lat : null;
+        var existingLon = capturedPhotoData ? capturedPhotoData.lon : null;
+        var existingTs = capturedPhotoData ? capturedPhotoData.timestamp : null;
+        var existingMismatch = capturedPhotoData ? capturedPhotoData.isMismatchDemo : false;
+
+        // Immediately attach photo so clicking Analyse Plot never drops it
+        capturedPhotoData = {
+          base64: b64,
+          filename: file.name,
+          lat: existingLat,
+          lon: existingLon,
+          timestamp: existingTs || new Date().toISOString(),
+          isMismatchDemo: existingMismatch
+        };
+        updatePhotoPreviewUI();
+
+        if (existingLat == null || existingLon == null) {
+          lockDeviceGps(function(gps) {
+            if (!capturedPhotoData) return;
+            if (gps.lat != null && capturedPhotoData.lat == null) {
+              capturedPhotoData.lat = gps.lat;
+              capturedPhotoData.lon = gps.lon;
+              capturedPhotoData.timestamp = new Date().toISOString();
+              updatePhotoPreviewUI();
+              showToast('📷 Photo attached & GPS locked (' + gps.source + ')', 'success');
+            } else {
+              showToast('📷 Photo attached (EXIF GPS will be checked or use Demo GPS)', 'success');
+            }
+          });
+        } else {
+          showToast('📷 Photo attached with locked GPS coordinates', 'success');
+        }
       };
       reader.readAsDataURL(file);
     });
@@ -369,14 +417,63 @@ function initUI() {
 
   if ($lockGpsBtn) {
     $lockGpsBtn.addEventListener('click', function() {
-      lockGpsCoordinates(function(gps) {
+      lockDeviceGps(function(gps) {
+        if (gps.lat == null) {
+          showToast('⚠ Browser GPS permission unavailable. Use Demo GPS buttons for simulation.', 'warning');
+          return;
+        }
         capturedPhotoData = capturedPhotoData || { base64: null, filename: null };
         capturedPhotoData.lat = gps.lat;
         capturedPhotoData.lon = gps.lon;
         capturedPhotoData.timestamp = new Date().toISOString();
+        capturedPhotoData.isMismatchDemo = false;
         updatePhotoPreviewUI();
-        showToast('📍 GPS Coordinates Locked (' + gps.lat.toFixed(4) + ', ' + gps.lon.toFixed(4) + ')', 'success');
+        showToast('📍 Device GPS Locked (' + gps.lat.toFixed(4) + ', ' + gps.lon.toFixed(4) + ')', 'success');
       });
+    });
+  }
+
+  if ($demoPlotBtn) {
+    $demoPlotBtn.addEventListener('click', function() {
+      var c = getPlotCenterFallback();
+      capturedPhotoData = capturedPhotoData || { base64: null, filename: null };
+      capturedPhotoData.lat = c.lat;
+      capturedPhotoData.lon = c.lon;
+      capturedPhotoData.timestamp = new Date().toISOString();
+      capturedPhotoData.isMismatchDemo = false;
+      updatePhotoPreviewUI();
+      showToast('📍 Simulated Plot GPS locked (' + c.lat.toFixed(4) + ', ' + c.lon.toFixed(4) + ')', 'success');
+    });
+  }
+
+  if ($demoMismatchBtn) {
+    $demoMismatchBtn.addEventListener('click', function() {
+      var c = getPlotCenterFallback();
+      // Pick Bengaluru (12.9716, 77.5946) or Hubballi if plot is already near Bengaluru
+      var farLat = Math.abs(c.lat - 12.9716) > 0.45 ? 12.9716 : 15.3647;
+      var farLon = Math.abs(c.lat - 12.9716) > 0.45 ? 77.5946 : 75.1240;
+      capturedPhotoData = capturedPhotoData || { base64: null, filename: null };
+      capturedPhotoData.lat = farLat;
+      capturedPhotoData.lon = farLon;
+      capturedPhotoData.timestamp = new Date().toISOString();
+      capturedPhotoData.isMismatchDemo = true;
+      updatePhotoPreviewUI();
+      showToast('🏙 City/Far GPS set (' + farLat.toFixed(4) + ', ' + farLon.toFixed(4) + ') — will flag OUTSIDE_REGION', 'warning');
+    });
+  }
+
+  if ($clearGpsBtn) {
+    $clearGpsBtn.addEventListener('click', function() {
+      if (capturedPhotoData && capturedPhotoData.base64) {
+        capturedPhotoData.lat = null;
+        capturedPhotoData.lon = null;
+        capturedPhotoData.timestamp = null;
+        capturedPhotoData.isMismatchDemo = false;
+      } else {
+        capturedPhotoData = null;
+      }
+      updatePhotoPreviewUI();
+      showToast('GPS coordinates cleared (will submit as MISSING_GPS).', 'warning');
     });
   }
 
@@ -791,7 +888,8 @@ function setMode(mode) {
   if (currentResult) {
     var ts = currentResult.time_series || {};
     if (mode === 'farmer') {
-      renderFarmerChart(ts);
+      var vs = currentResult.hydromet ? Number(currentResult.hydromet.survival_liters || 0) : 0;
+      renderFarmerChart(ts, vs);
     } else {
       renderOfficerChart(ts, currentResult.drought);
     }
@@ -850,6 +948,16 @@ function renderResults(data) {
       : (drought.stage === 'healthy'
         ? 'Moisture indices are within normal bounds; follow standard irrigation coaching below.'
         : 'Plot is under stress watchlist. Save your SHA-256 receipt and monitor weekly.');
+    var $geolockPill = document.getElementById('farmer-geolock-pill');
+    if ($geolockPill) {
+      var gStatus = data.geolock_status || 'MISSING_GPS';
+      var gCls = geolockPillClass(gStatus);
+      var distPart = data.distance_km != null ? (' · ' + Number(data.distance_km).toFixed(2) + ' km from plot') : '';
+      var matchPart = ' · Region Match: ' + (data.region_match ? 'Yes' : 'No');
+      var photoPart = data.photo_attached ? ' · Camera Photo Attached' : ' · No Camera Photo';
+      $geolockPill.innerHTML = '<span class="geolock-pill ' + gCls + '">' +
+        escHtml(gStatus) + distPart + matchPart + photoPart + '</span>';
+    }
     if ($farmerPdfLink) {
       if (data.pdf_download_url) {
         $farmerPdfLink.href = data.pdf_download_url;
@@ -904,8 +1012,6 @@ function renderResults(data) {
   document.getElementById('farmer-kn-script').textContent =
     drought.recommendation_kn || drought.recommendation_en;
 
-  setupAudio(data.audio_base64, drought, data.audio_source, data.audio_mime);
-
   // ── Regional Office Monitor fields ─────────────────────────────────────────
   document.getElementById('val-officer-stage').textContent = drought.stage_label;
   document.getElementById('val-officer-scene').textContent =
@@ -933,7 +1039,7 @@ function renderResults(data) {
 
   // Render charts for active mode
   if (activeMode === 'farmer') {
-    renderFarmerChart(ts);
+    renderFarmerChart(ts, vsurv);
   } else {
     renderOfficerChart(ts, drought);
   }
@@ -1026,8 +1132,8 @@ function stageClass(stage) {
   return 'healthy';
 }
 
-// ── Chart.js: Farmer Soil Moisture & ET0 Trend ───────────────────────────────
-function renderFarmerChart(ts) {
+// ── Chart.js: Simple Single-Axis Farmer Soil Water Level Chart ───────────────
+function renderFarmerChart(ts, survivalLiters) {
   if (typeof Chart === 'undefined') return;
   var canvas = document.getElementById('farmer-trend-chart');
   if (!canvas) return;
@@ -1036,34 +1142,54 @@ function renderFarmerChart(ts) {
 
   var dates = ts.dates || [];
   var sm    = ts.soil_moisture || [];
-  var et0   = ts.et0 || [];
+  var safeThreshold = 20;
+  var safeLine = dates.map(function() { return safeThreshold; });
+
+  var dangerZonePlugin = {
+    id: 'survivalDangerZone',
+    beforeDatasetsDraw: function(chart) {
+      var yScale = chart.scales.y;
+      var xScale = chart.scales.x;
+      var y20 = yScale.getPixelForValue(safeThreshold);
+      var y0 = yScale.getPixelForValue(0);
+      var c = chart.ctx;
+
+      c.save();
+      c.fillStyle = 'rgba(220, 38, 38, 0.09)';
+      c.fillRect(xScale.left, y20, xScale.right - xScale.left, Math.max(0, y0 - y20));
+
+      c.fillStyle = '#b91c1c';
+      c.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
+      c.textAlign = 'right';
+      c.fillText('Survival Irrigation Needed (< 20%)', xScale.right - 8, Math.min(y0 - 8, y20 + 16));
+      c.restore();
+    }
+  };
 
   farmerChart = new Chart(ctx, {
     type: 'line',
+    plugins: [dangerZonePlugin],
     data: {
       labels: dates,
       datasets: [
         {
-          label: 'Soil Moisture 0–7 cm (%)',
+          label: "Your Plot's Soil Water (%)",
           data: sm,
           borderColor: '#0066CC',
           backgroundColor: 'rgba(0, 102, 204, 0.12)',
           borderWidth: 3,
           fill: true,
           tension: 0.35,
-          pointRadius: 4,
-          yAxisID: 'y'
+          pointRadius: 4
         },
         {
-          label: 'FAO-56 ET₀ (mm/day)',
-          data: et0,
-          borderColor: '#FF791B',
-          backgroundColor: 'rgba(255, 121, 27, 0.1)',
-          borderWidth: 2.5,
-          borderDash: [5, 4],
-          tension: 0.35,
-          pointRadius: 3,
-          yAxisID: 'y1'
+          label: 'Minimum Safe Level for Crop Survival (20%)',
+          data: safeLine,
+          borderColor: '#DC2626',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          fill: false,
+          pointRadius: 0
         }
       ]
     },
@@ -1075,6 +1201,14 @@ function renderFarmerChart(ts) {
         legend: {
           position: 'top',
           labels: { color: '#1D1D1F', font: { size: 12, weight: '600' } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(item) {
+              var v = Number(item.parsed.y).toFixed(1);
+              return item.dataset.label + ': ' + v + '%';
+            }
+          }
         }
       },
       scales: {
@@ -1082,19 +1216,14 @@ function renderFarmerChart(ts) {
           type: 'linear',
           position: 'left',
           min: 0,
-          max: 45,
+          max: 50,
           grid: { color: '#E8E8ED' },
-          ticks: { color: '#0066CC', font: { size: 12 } },
-          title: { display: true, text: 'Soil Moisture (%)', color: '#0066CC' }
-        },
-        y1: {
-          type: 'linear',
-          position: 'right',
-          min: 0,
-          max: 8,
-          grid: { drawOnChartArea: false },
-          ticks: { color: '#FF791B', font: { size: 12 } },
-          title: { display: true, text: 'ET₀ (mm/day)', color: '#FF791B' }
+          ticks: {
+            color: '#0066CC',
+            font: { size: 12 },
+            callback: function(v) { return v + '%'; }
+          },
+          title: { display: true, text: 'Soil Water (%)', color: '#0066CC' }
         },
         x: {
           grid: { display: false },
@@ -1103,6 +1232,22 @@ function renderFarmerChart(ts) {
       }
     }
   });
+
+  var $takeaway = document.getElementById('farmer-chart-takeaway');
+  if ($takeaway) {
+    var dropIdx = sm.findIndex(function(v) { return Number(v) < safeThreshold; });
+    var litresTxt = survivalLiters ? Math.round(Number(survivalLiters)).toLocaleString('en-IN') : '0';
+    if (dropIdx !== -1) {
+      $takeaway.className = 'farmer-chart-takeaway needs-water';
+      $takeaway.textContent =
+        'Soil water dropped below the 20% safe line around ' + (dates[dropIdx] || 'mid-season') +
+        ' — irrigate only the root zone with the exact ' + litresTxt + ' litres shown above.';
+    } else {
+      $takeaway.className = 'farmer-chart-takeaway';
+      $takeaway.textContent =
+        'Soil water stayed above the 20% safe line across the season — no emergency survival irrigation needed.';
+    }
+  }
 }
 
 // ── Chart.js: Regional Office Simple-Language Crop & Moisture Audit Chart ────
@@ -1269,79 +1414,6 @@ function renderOfficerChart(ts, drought) {
       }
     }
   });
-}
-
-// ── Audio & Speech Synthesis (gTTS MP3 + Browser Voice) ──────────────────────
-function speakKannadaBrowser(text) {
-  if (!('speechSynthesis' in window)) {
-    showToast('Browser speech synthesis unavailable.', 'warning');
-    return;
-  }
-  window.speechSynthesis.cancel();
-  var voices = window.speechSynthesis.getVoices();
-  var knVoice = voices.find(function(v) { return v.lang && v.lang.toLowerCase().startsWith('kn'); });
-  var hiVoice = voices.find(function(v) { return v.lang && v.lang.toLowerCase().startsWith('hi'); });
-
-  var sentences = String(text || '').split(/(?<=[.।!?])\s+/).filter(Boolean);
-  if (!sentences.length) sentences = [text];
-
-  sentences.forEach(function(sentence) {
-    var utter = new SpeechSynthesisUtterance(sentence);
-    if (knVoice) {
-      utter.voice = knVoice;
-      utter.lang = knVoice.lang;
-    } else if (hiVoice) {
-      utter.voice = hiVoice;
-      utter.lang = hiVoice.lang;
-    } else {
-      utter.lang = 'kn-IN';
-    }
-    utter.rate = 0.90;
-    window.speechSynthesis.speak(utter);
-  });
-  showToast('🗣 Reading Kannada advisory aloud', 'success');
-}
-
-function setupAudio(audioBase64, drought, audioSource, audioMime) {
-  var $audio    = document.getElementById('advisory-audio');
-  var $playBtn  = document.getElementById('btn-play-audio');
-  var $srcLabel = document.getElementById('audio-source-label');
-  var $speakBtn = document.getElementById('btn-speak-kn');
-
-  var knText = drought.recommendation_kn || drought.recommendation_en || '';
-
-  $speakBtn.onclick = function() {
-    speakKannadaBrowser(knText);
-  };
-
-  if (audioBase64) {
-    var mime = audioMime || 'audio/mpeg';
-    $audio.src = 'data:' + mime + ';base64,' + audioBase64;
-    $audio.style.display = 'inline-block';
-    $audio.load();
-    $playBtn.disabled = false;
-    $playBtn.textContent = '▶';
-    $srcLabel.textContent = '🔊 Spoken Kannada Audio Ready (gTTS · ಕನ್ನಡ)';
-
-    $playBtn.onclick = function() {
-      if ($audio.paused) {
-        $audio.play().catch(function() { speakKannadaBrowser(knText); });
-        $playBtn.textContent = '⏸';
-      } else {
-        $audio.pause();
-        $playBtn.textContent = '▶';
-      }
-    };
-    $audio.onended = function() { $playBtn.textContent = '▶'; };
-  } else {
-    $audio.pause();
-    $audio.removeAttribute('src');
-    $audio.style.display = 'none';
-    $playBtn.disabled = false;
-    $playBtn.textContent = '▶';
-    $srcLabel.textContent = '🗣 Browser Kannada Speech Ready (Click ▶ or Speak Kannada)';
-    $playBtn.onclick = function() { speakKannadaBrowser(knText); };
-  }
 }
 
 // ── Plots History Page ────────────────────────────────────────────────────────
@@ -1644,6 +1716,13 @@ async function loadRegionalSummary(taluk) {
   }
 }
 
+function geolockPillClass(status) {
+  if (status === 'VERIFIED_IN_REGION') return 'verified';
+  if (status === 'DISTRICT_MATCH_NEARBY') return 'nearby';
+  if (status === 'OUTSIDE_REGION_WARNING') return 'outside';
+  return 'missing';
+}
+
 function renderRegionalTable(plots) {
   var $tbody = document.getElementById('regional-table-body');
   if (!plots || plots.length === 0) {
@@ -1664,9 +1743,16 @@ function renderRegionalTable(plots) {
       ? ('Sy. ' + escHtml(p.survey_no) + (p.village ? '<br/><span class="plot-row-meta">' + escHtml(p.village) + '</span>' : ''))
       : (p.village ? escHtml(p.village) : '<span class="plot-row-meta">Custom polygon</span>');
 
-    var photoCell = p.photo_url
-      ? '<button type="button" class="btn-secondary regional-row-btn" data-view-photo="' + escHtml(p.plot_id) + '">📷 GPS Locked</button>'
-      : '<span class="plot-row-meta">—</span>';
+    var gStatus = p.geolock_status || 'MISSING_GPS';
+    var gCls = geolockPillClass(gStatus);
+    var distLabel = p.distance_km != null ? (' (' + Number(p.distance_km).toFixed(1) + ' km)') : '';
+    var matchTxt = p.region_match ? 'Match: Yes' : 'Match: No';
+    var photoCell = '<span class="geolock-pill ' + gCls + '" title="' + escHtml(matchTxt) + '">' +
+      escHtml(gStatus) + escHtml(distLabel) + '</span>' +
+      (p.photo_url
+        ? '<br/><button type="button" class="btn-secondary regional-row-btn" style="margin-top:4px;" data-view-photo="' +
+            escHtml(p.plot_id) + '">📷 View Photo</button>'
+        : '');
 
     var dossierCell = p.pdf_download_url
       ? '<a href="' + escHtml(p.pdf_download_url) + '" download class="btn-secondary regional-row-btn" data-pdf-dl="1" style="text-decoration:none;">⬇ Audit PDF</a>'
@@ -1746,6 +1832,11 @@ async function selectRegionalPlot(plotId, triggerDossier) {
     taluk: item.taluk,
     crop_type: item.crop_type,
     area_acres: item.area_acres,
+    pmfby_eligible: item.pmfby_eligible,
+    geolock_status: item.geolock_status,
+    region_match: item.region_match,
+    distance_km: item.distance_km,
+    photo_attached: item.photo_attached,
     centroid_lat: item.centroid_lat,
     centroid_lon: item.centroid_lon,
     satellite: {

@@ -146,6 +146,9 @@ def generate_pmfby_pdf(
     photo_lon = payload.get("photo_lon")
     photo_timestamp = payload.get("photo_timestamp")
     photo_path = payload.get("photo_path")
+    geolock_status = payload.get("geolock_status", "MISSING_GPS")
+    region_match = payload.get("region_match", False)
+    distance_km = payload.get("distance_km")
     plot_id = payload.get("plot_id", "N/A")
     lat = payload.get("centroid_lat", 0.0)
     lon = payload.get("centroid_lon", 0.0)
@@ -248,6 +251,13 @@ def generate_pmfby_pdf(
         farm_data.append(["Observed Symptoms", ", ".join(map(str, observed_symptoms))])
     if pmfby_eligible:
         farm_data.append(["PMFBY Eligibility", str(pmfby_eligible)])
+    dist_txt = f"{float(distance_km):.2f} km" if distance_km is not None else "N/A"
+    farm_data.append(
+        [
+            "Photo Geolock & Region",
+            f"{geolock_status} (Region Match: {'Yes' if region_match else 'No'}, Distance: {dist_txt})",
+        ]
+    )
     farm_data.extend(
         [
             ["Plot Area", f"{area:.2f} acres"],
@@ -363,9 +373,20 @@ def generate_pmfby_pdf(
     story.append(hm_table)
     story.append(Spacer(1, 6 * mm))
 
-    # ── Geotagged Field Evidence (if photo captured) ────────────────────────
-    if photo_sha256 or (photo_path and Path(str(photo_path)).exists()):
-        story.append(Paragraph("3b. Geotagged Field Evidence", h2))
+    # ── Geotagged Field Evidence (if photo or GPS captured) ─────────────────
+    has_photo_file = bool(photo_path and Path(str(photo_path)).exists())
+    if photo_sha256 or has_photo_file or geolock_status != "MISSING_GPS":
+        story.append(Paragraph("3b. Geotagged Field Evidence & Region Match", h2))
+        dist_str = f"{float(distance_km):.2f} km" if distance_km is not None else "N/A"
+        story.append(
+            Paragraph(
+                f"<b>Geolock Status:</b> {geolock_status} · "
+                f"<b>Region Match:</b> {'YES' if region_match else 'NO'} · "
+                f"<b>Distance to Plot:</b> {dist_str} · "
+                f"<b>Photo Attached:</b> {'Yes' if has_photo_file else 'No (GPS simulation / no camera file)'}",
+                body,
+            )
+        )
         if photo_lat is not None and photo_lon is not None:
             story.append(
                 Paragraph(
@@ -381,7 +402,7 @@ def generate_pmfby_pdf(
                     body,
                 )
             )
-        if photo_path and Path(str(photo_path)).exists():
+        if has_photo_file:
             try:
                 from PIL import Image as PILImage
 

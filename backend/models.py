@@ -57,6 +57,9 @@ class FarmPlot(Base):
     photo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     photo_lon: Mapped[float | None] = mapped_column(Float, nullable=True)
     photo_timestamp: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    geolock_status: Mapped[str] = mapped_column(String(32), default="MISSING_GPS")
+    region_match: Mapped[bool] = mapped_column(Boolean, default=False)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     pmfby_eligible: Mapped[str | None] = mapped_column(String(64), nullable=True)
     polygon_geojson: Mapped[str] = mapped_column(Text, nullable=False)  # GeoJSON string
     centroid_lat: Mapped[float] = mapped_column(Float, nullable=False)

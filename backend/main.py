@@ -11,8 +11,10 @@ Routes:
 import base64
 import hashlib
 import hmac
+import io
 import json
 import logging
+import math
 import time
 import uuid as _uuid_mod
 from contextlib import asynccontextmanager
@@ -306,12 +308,106 @@ def _compute_pmfby_eligibility(stage: str) -> str:
     return "NOT ELIGIBLE — Normal Moisture"
 
 
+_TALUK_BOUNDS = {
+    "Madhugiri": (13.48, 13.85, 77.05, 77.38),
+    "Koratagere": (13.38, 13.68, 77.08, 77.38),
+    "Chikkanayakanahalli": (13.25, 13.62, 76.72, 77.08),
+    "Pavagada": (13.90, 14.30, 77.10, 77.50),
+    "Sira": (13.55, 13.95, 76.75, 77.12),
+    "Tumakuru": (13.18, 13.50, 76.95, 77.28),
+    "Gubbi": (13.15, 13.50, 76.78, 77.08),
+    "Tiptur": (13.12, 13.42, 76.35, 76.68),
+    "Turuvekere": (13.02, 13.32, 76.52, 76.85),
+    "Kunigal": (12.88, 13.20, 76.88, 77.20),
+    "Challakere": (14.12, 14.52, 76.48, 76.88),
+    "Hiriyur": (13.78, 14.15, 76.45, 76.82),
+    "Bagepalli": (13.62, 13.96, 77.62, 78.00),
+    "Kalaburagi": (17.15, 17.55, 76.65, 77.05),
+    "Vijayapura": (16.65, 17.05, 75.52, 75.92),
+}
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compute great-circle distance in kilometers between two lat/lon points."""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return round(2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a)), 2)
+
+
+def _dms_to_deg(dms: object, ref: object) -> float | None:
+    try:
+        vals = []
+        for part in dms:  # type: ignore[union-attr]
+            if isinstance(part, tuple) and len(part) == 2:
+                vals.append(float(part[0]) / float(part[1] or 1))
+            else:
+                vals.append(float(part))
+        if len(vals) != 3:
+            return None
+        deg = vals[0] + vals[1] / 60.0 + vals[2] / 3600.0
+        if ref and str(ref).strip().upper() in ("S", "W"):
+            deg = -deg
+        return round(deg, 6)
+    except Exception:
+        return None
+
+
+def _extract_exif_gps(
+    img_bytes: bytes,
+) -> tuple[float | None, float | None, str | None]:
+    """Extract decimal (lat, lon, datetime_str) from image EXIF GPS tags if present."""
+    try:
+        from PIL import Image as PILImage
+        from PIL.ExifTags import GPSTAGS
+
+        with PILImage.open(io.BytesIO(img_bytes)) as img:
+            exif = img.getexif()
+            if not exif:
+                return None, None, None
+            exif_ts = exif.get(36867) or exif.get(306)
+            gps_ifd = exif.get_ifd(0x8825)
+            if not gps_ifd:
+                return None, None, str(exif_ts) if exif_ts else None
+            gps = {GPSTAGS.get(k, k): v for k, v in gps_ifd.items()}
+            lat = _dms_to_deg(gps.get("GPSLatitude"), gps.get("GPSLatitudeRef"))
+            lon = _dms_to_deg(gps.get("GPSLongitude"), gps.get("GPSLongitudeRef"))
+            return lat, lon, str(exif_ts) if exif_ts else None
+    except Exception:
+        return None, None, None
+
+
+def _evaluate_photo_geolock(
+    photo_lat: float | None,
+    photo_lon: float | None,
+    plot_lat: float,
+    plot_lon: float,
+    taluk: str,
+) -> tuple[str, bool, float | None]:
+    """
+    Validate photo GPS against the plot centroid and selected taluk bounds.
+    Returns (geolock_status, region_match, distance_km).
+    """
+    if photo_lat is None or photo_lon is None:
+        return "MISSING_GPS", False, None
+
+    dist_km = _haversine_km(photo_lat, photo_lon, plot_lat, plot_lon)
+
+    if dist_km <= 5.0:
+        return "VERIFIED_IN_REGION", True, dist_km
+    if dist_km <= 35.0:
+        return "DISTRICT_MATCH_NEARBY", True, dist_km
+    return "OUTSIDE_REGION_WARNING", False, dist_km
+
+
 def _save_uploaded_photo(
     plot_id: str,
     photo_base64: str,
     filename: str | None = None,
-) -> tuple[str, str]:
-    """Decode base64 field photo, write to PHOTO_UPLOAD_DIR, return (path, sha256)."""
+) -> tuple[str, str, float | None, float | None, str | None]:
+    """Decode base64 photo, extract EXIF GPS, write to PHOTO_UPLOAD_DIR."""
     raw_b64 = photo_base64.strip()
     ext = "jpg"
     if raw_b64.startswith("data:") and "," in raw_b64:
@@ -330,17 +426,18 @@ def _save_uploaded_photo(
     except Exception as exc:
         raise HTTPException(status_code=422, detail="Invalid photo base64 payload.") from exc
 
-    if not img_bytes or len(img_bytes) > 5 * 1024 * 1024:
+    if not img_bytes or len(img_bytes) > 10 * 1024 * 1024:
         raise HTTPException(
-            status_code=422, detail="Photo must be non-empty and under 5 MB."
+            status_code=422, detail="Photo must be non-empty and under 10 MB."
         )
 
+    exif_lat, exif_lon, exif_ts = _extract_exif_gps(img_bytes)
     photo_sha256 = hashlib.sha256(img_bytes).hexdigest()
     upload_dir = Path(settings.PHOTO_UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
     out_path = upload_dir / f"{plot_id}.{ext}"
     out_path.write_bytes(img_bytes)
-    return str(out_path), photo_sha256
+    return str(out_path), photo_sha256, exif_lat, exif_lon, exif_ts
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -507,11 +604,30 @@ async def analyze_plot(
     photo_path: str | None = None
     photo_sha256: str | None = None
     photo_url: str | None = None
+    eff_photo_lat = body.photo_lat
+    eff_photo_lon = body.photo_lon
+    eff_photo_ts = body.photo_timestamp
+
     if body.photo_base64:
-        photo_path, photo_sha256 = _save_uploaded_photo(
+        photo_path, photo_sha256, exif_lat, exif_lon, exif_ts = _save_uploaded_photo(
             plot_id, body.photo_base64, body.photo_filename
         )
         photo_url = f"{base_url}/api/photos/{Path(photo_path).name}"
+        if eff_photo_lat is None and exif_lat is not None:
+            eff_photo_lat = exif_lat
+        if eff_photo_lon is None and exif_lon is not None:
+            eff_photo_lon = exif_lon
+        if not eff_photo_ts and exif_ts:
+            eff_photo_ts = exif_ts
+
+    geolock_status, region_match, distance_km = _evaluate_photo_geolock(
+        eff_photo_lat, eff_photo_lon, lat_c, lon_c, effective_taluk
+    )
+    if not body.allow_missing_gps and geolock_status == "MISSING_GPS":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Photo GPS coordinates are required when allow_missing_gps is false.",
+        )
 
     db_plot = FarmPlot(
         id=plot_id,
@@ -528,9 +644,12 @@ async def analyze_plot(
         observed_symptoms=body.observed_symptoms,
         photo_path=photo_path,
         photo_sha256=photo_sha256,
-        photo_lat=body.photo_lat,
-        photo_lon=body.photo_lon,
-        photo_timestamp=body.photo_timestamp,
+        photo_lat=eff_photo_lat,
+        photo_lon=eff_photo_lon,
+        photo_timestamp=eff_photo_ts,
+        geolock_status=geolock_status,
+        region_match=region_match,
+        distance_km=distance_km,
         pmfby_eligible=pmfby_eligible,
         polygon_geojson=geojson_str,
         centroid_lat=lat_c,
@@ -560,7 +679,7 @@ async def analyze_plot(
     db.add(db_telem)
     await db.flush()
 
-    # ── 5. Voice advisory (gTTS Kannada + browser speechSynthesis fallback) ──
+    # ── 5. Kannada Crop Water Advisory (text-only) ──────────────────────────
     audio_b64, advisory_kn = generate_voice_advisory(
         farmer_name=body.farmer_name,
         crop_type=body.crop_type,
@@ -573,8 +692,8 @@ async def analyze_plot(
     if advisory_kn:
         drought.recommendation_kn = advisory_kn
 
-    audio_mime = "audio/mpeg" if audio_b64 else "text/plain"
-    audio_source = "gtts_kn" if audio_b64 else "browser_tts"
+    audio_mime = "text/plain"
+    audio_source = "text_only"
 
     # ── 6. PMFBY PDF ─────────────────────────────────────────────────────────
     pdf_sha256: Optional[str] = None
@@ -596,10 +715,13 @@ async def analyze_plot(
         "observed_symptoms": body.observed_symptoms,
         "pmfby_eligible": pmfby_eligible,
         "photo_sha256": photo_sha256,
-        "photo_lat": body.photo_lat,
-        "photo_lon": body.photo_lon,
-        "photo_timestamp": body.photo_timestamp,
+        "photo_lat": eff_photo_lat,
+        "photo_lon": eff_photo_lon,
+        "photo_timestamp": eff_photo_ts,
         "photo_path": photo_path,
+        "geolock_status": geolock_status,
+        "region_match": region_match,
+        "distance_km": distance_km,
         "centroid_lat": lat_c,
         "centroid_lon": lon_c,
         "satellite": sat_payload,
@@ -652,9 +774,14 @@ async def analyze_plot(
         pmfby_eligible=pmfby_eligible,
         photo_sha256=photo_sha256,
         photo_url=photo_url,
-        photo_lat=body.photo_lat,
-        photo_lon=body.photo_lon,
-        photo_timestamp=body.photo_timestamp,
+        photo_lat=eff_photo_lat,
+        photo_lon=eff_photo_lon,
+        photo_timestamp=eff_photo_ts,
+        geolock_status=geolock_status,
+        region_match=region_match,
+        distance_km=distance_km,
+        geolock_distance_km=distance_km,
+        photo_attached=bool(photo_path),
         centroid_lat=lat_c,
         centroid_lon=lon_c,
         satellite=sat_indices,
@@ -869,6 +996,11 @@ async def regional_summary(
                 photo_lat=p.photo_lat,
                 photo_lon=p.photo_lon,
                 photo_timestamp=p.photo_timestamp,
+                geolock_status=p.geolock_status or "MISSING_GPS",
+                region_match=bool(p.region_match),
+                distance_km=p.distance_km,
+                geolock_distance_km=p.distance_km,
+                photo_attached=bool(p.photo_path),
                 centroid_lat=p.centroid_lat,
                 centroid_lon=p.centroid_lon,
                 polygon_coordinates=_extract_polygon_coords(p.polygon_geojson),
@@ -1000,6 +1132,9 @@ async def generate_plot_dossier(
         "photo_lon": plot.photo_lon,
         "photo_timestamp": plot.photo_timestamp,
         "photo_path": plot.photo_path,
+        "geolock_status": plot.geolock_status or "MISSING_GPS",
+        "region_match": bool(plot.region_match),
+        "distance_km": plot.distance_km,
         "centroid_lat": plot.centroid_lat,
         "centroid_lon": plot.centroid_lon,
         "satellite": {

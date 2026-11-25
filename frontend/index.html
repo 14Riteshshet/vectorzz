@@ -92,7 +92,7 @@
         </h1>
         <p class="hero-subtitle" id="hero-subtitle">
           Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres,
-          0–7 cm soil moisture, crop-stage borewell protection guidance, and a spoken Kannada voice advisory.
+          0–7 cm soil moisture, crop-stage borewell protection guidance, and a Kannada crop water advisory.
         </p>
 
         <!-- Taluk presets -->
@@ -426,7 +426,7 @@
             <div class="photo-capture-header">
               <div>
                 <div class="form-label" style="margin-bottom:2px;">📷 Live Geotagged Field Photo Capture</div>
-                <span class="form-hint">Capture field condition photo with GPS lock for tamper-evident PMFBY evidence.</span>
+                <span class="form-hint">Capture a field photo with device GPS, or use Demo / Field Simulation below when testing from a city.</span>
               </div>
               <div class="photo-capture-actions">
                 <label for="field-photo-input" class="btn-secondary photo-upload-label">
@@ -436,12 +436,25 @@
                 <button type="button" class="btn-secondary" id="btn-lock-gps" style="padding:var(--space-2) var(--space-4);font-size:13px;">
                   📍 Lock GPS
                 </button>
+                <button type="button" class="btn-secondary" id="btn-demo-plot-gps" style="padding:var(--space-2) var(--space-4);font-size:13px;">
+                  📍 Demo: Lock GPS to Selected Farm
+                </button>
               </div>
+            </div>
+            <div class="demo-gps-row">
+              <span class="demo-gps-label">City Testing Helpers:</span>
+              <button type="button" class="btn-secondary demo-gps-btn" id="btn-demo-mismatch-gps">
+                🏙 Test Mismatch (City/Far GPS)
+              </button>
+              <button type="button" class="btn-secondary demo-gps-btn" id="btn-clear-gps">
+                ✕ Clear GPS
+              </button>
             </div>
             <div class="photo-preview-box" id="photo-preview-box" style="display:none;">
               <img id="photo-preview-img" alt="Captured geotagged field photo preview" class="photo-preview-thumb" />
               <div class="photo-preview-meta">
                 <span class="gps-locked-badge" id="photo-gps-badge">📍 GPS Coordinates Locked</span>
+                <div class="photo-meta-line" id="photo-evidence-status"></div>
                 <div class="photo-meta-line" id="photo-gps-coords">Lat: — · Lon: —</div>
                 <div class="photo-meta-line" id="photo-timestamp-label">Timestamp: —</div>
               </div>
@@ -497,6 +510,7 @@
                 <div class="metric-label" style="margin-bottom:4px;">PMFBY Drought Eligibility Pre-Check</div>
                 <div class="eligibility-badge" id="farmer-eligibility-badge">—</div>
                 <p class="eligibility-text" id="farmer-eligibility-text"></p>
+                <div class="geolock-status-line" id="farmer-geolock-pill"></div>
               </div>
               <a id="farmer-pdf-receipt-link" href="#" download class="btn-primary" style="display:none;text-decoration:none;">
                 ⬇ Download Personal PMFBY Receipt (PDF)
@@ -504,28 +518,14 @@
             </div>
           </div>
 
-          <!-- Spoken Kannada Voice Advisory Player -->
-          <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Spoken Kannada farm advisory">
+          <!-- Kannada Crop Water Advisory Card -->
+          <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Kannada crop water advisory">
             <div class="audio-header-row">
               <div class="audio-title-group">
-                <span class="audio-flag" aria-hidden="true">🔊</span>
+                <span class="audio-flag" aria-hidden="true">🌿</span>
                 <div>
-                  <div class="audio-title">ಕನ್ನಡ ಧ್ವನಿ ಸಲಹೆ — Spoken Kannada Farm Advisory</div>
-                  <div class="audio-lang audio-status-pill" id="audio-source-label">Voice Status: Ready on analysis</div>
+                  <div class="audio-title">ಕನ್ನಡ ಬೆಳೆ ನೀರಿನ ಸಲಹೆ — Kannada Crop Water Advisory</div>
                 </div>
-              </div>
-              <div class="audio-controls">
-                <button type="button" class="btn-play" id="btn-play-audio"
-                        aria-label="Play Kannada advisory audio" disabled>
-                  ▶
-                </button>
-                <audio id="advisory-audio" controls style="display:none;" aria-label="Kannada advisory audio">
-                  Your browser does not support the audio element.
-                </audio>
-                <button type="button" class="btn-secondary btn-speak-kn" id="btn-speak-kn"
-                        aria-label="Listen to Kannada advisory">
-                  🗣 Speak Kannada
-                </button>
               </div>
             </div>
             <div class="advisory-metrics-chips" id="advisory-metrics-chips"></div>
@@ -580,12 +580,13 @@
             </div>
           </div>
 
-          <!-- Farmer Soil Moisture & ET0 Trend -->
+          <!-- Farmer Soil Water Level Chart -->
           <div class="chart-container" aria-labelledby="farmer-chart-title">
             <h3 class="card-title" id="farmer-chart-title">
-              <span aria-hidden="true">🌦</span> 2026 Soil Moisture (0–7 cm) vs FAO-56 ET₀ Demand
+              <span aria-hidden="true">💧</span> Farm Soil Water Level (%) — When Your Crop Needs Survival Water
             </h3>
-            <canvas id="farmer-trend-chart" role="img" aria-label="Line chart of seasonal soil moisture and reference evapotranspiration"></canvas>
+            <canvas id="farmer-trend-chart" role="img" aria-label="Line chart showing farm soil water level and minimum safe level threshold"></canvas>
+            <p class="farmer-chart-takeaway" id="farmer-chart-takeaway"></p>
           </div>
 
         </div><!-- /#farmer-view -->
@@ -717,7 +718,7 @@
   <footer class="site-footer">
     <div class="container">
       <strong>SookshmaJal</strong> · Team VECTORZZ (Akshay, Ritesh, Sunil, Rohith) · Hackwarts 2026 AgriTech Track<br />
-      Sentinel-2 L2A · Open-Meteo FAO-56 ET₀ · Spoken Kannada Voice Advisory · Tamper-Evident PMFBY Dossiers
+      Sentinel-2 L2A · Open-Meteo FAO-56 ET₀ · Kannada Crop Water Advisory · Tamper-Evident PMFBY Dossiers
     </div>
   </footer>
 

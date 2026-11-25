@@ -79,6 +79,10 @@ class AnalyzePlotRequest(BaseModel):
     photo_lat: float | None = Field(None, ge=-90.0, le=90.0)
     photo_lon: float | None = Field(None, ge=-180.0, le=180.0)
     photo_timestamp: str | None = Field(None, max_length=64)
+    allow_missing_gps: bool = Field(
+        True,
+        description="When false, rejects photo submissions that lack GPS coordinates.",
+    )
     polygon_coordinates: list[list[float]] = Field(
         ...,
         min_length=4,
@@ -216,6 +220,11 @@ class AnalyzePlotResponse(BaseModel):
     photo_lat: float | None = None
     photo_lon: float | None = None
     photo_timestamp: str | None = None
+    geolock_status: str = "MISSING_GPS"
+    region_match: bool = False
+    distance_km: float | None = None
+    geolock_distance_km: float | None = None
+    photo_attached: bool = False
     centroid_lat: float
     centroid_lon: float
     satellite: SatelliteIndices
@@ -223,9 +232,9 @@ class AnalyzePlotResponse(BaseModel):
     hydromet: HydrometData
     time_series: TimeSeriesData = Field(default_factory=TimeSeriesData)
     irrigation_guidance: CropIrrigationGuidance | None = None
-    audio_base64: str | None = None  # Spoken Kannada MP3 via gTTS when online
-    audio_mime: str = "audio/mpeg"
-    audio_source: str = "browser_tts"
+    audio_base64: str | None = None
+    audio_mime: str = "text/plain"
+    audio_source: str = "text_only"
     pdf_sha256: str | None = None
     pdf_download_url: str | None = None
     analysed_at: str
@@ -279,6 +288,11 @@ class RegionalPlotItem(BaseModel):
     photo_lat: float | None = None
     photo_lon: float | None = None
     photo_timestamp: str | None = None
+    geolock_status: str = "MISSING_GPS"
+    region_match: bool = False
+    distance_km: float | None = None
+    geolock_distance_km: float | None = None
+    photo_attached: bool = False
     centroid_lat: float
     centroid_lon: float
     polygon_coordinates: list[list[float]] = Field(default_factory=list)

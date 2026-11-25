@@ -1,24 +1,10 @@
 """
-SookshmaJal – Kannada Advisory & Spoken TTS Generator.
+SookshmaJal – Kannada Crop Water Advisory Generator.
 Builds natural, localized Kannada farmer guidance with short sentences
-and clear pauses, and synthesizes real spoken Kannada MP3 audio via gTTS
-when online (or cleanly signals browser speechSynthesis when offline).
+and clear pauses (text-only, no broken audio players or external TTS calls).
 """
 
 from __future__ import annotations
-
-import base64
-import io
-import logging
-
-try:
-    from gtts import gTTS
-
-    _GTTS_AVAILABLE = True
-except ImportError:
-    _GTTS_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
 
 _CROP_KN: dict[str, str] = {
     "ragi": "ರಾಗಿ",
@@ -52,7 +38,7 @@ def build_kannada_advisory_text(
 ) -> str:
     """
     Build short, natural Kannada sentences with localized crop names and clear
-    pauses, keeping raw technical numbers out of the spoken sentence body.
+    pauses, keeping raw technical numbers out of the sentence body.
     """
     crop_kn = localize_crop_kn(crop_type)
     daily_l = max(0, round(survival_liters / 7.0))
@@ -87,52 +73,6 @@ def build_kannada_advisory_text(
     )
 
 
-def synthesize_kannada_gtts(text_kn: str) -> str | None:
-    """
-    Synthesize real spoken Kannada MP3 audio using gTTS(lang='kn').
-    Returns base64-encoded MP3 string or None when offline/unavailable.
-    """
-    if not _GTTS_AVAILABLE or not text_kn.strip():
-        return None
-    try:
-        tts = gTTS(text=text_kn, lang="kn", slow=False)
-        buf = io.BytesIO()
-        tts.write_to_fp(buf)
-        raw = buf.getvalue()
-        if not raw:
-            return None
-        return base64.b64encode(raw).decode("ascii")
-    except Exception as exc:
-        logger.warning("gTTS Kannada synthesis unavailable (%s); using browser TTS.", exc)
-        return None
-
-
-def generate_tts_advisory(
-    farmer_name: str,
-    crop_type: str,
-    drought_stage: str,
-    et0: float,
-    survival_liters: float,
-    ndvi: float,
-    ndmi: float,
-) -> tuple[str | None, str, str, str]:
-    """
-    Generate Kannada text advisory and optional gTTS spoken MP3 audio.
-    Returns (audio_base64, audio_mime, audio_source, advisory_text_kn).
-    """
-    advisory_kn = build_kannada_advisory_text(
-        drought_stage=drought_stage,
-        et0=et0,
-        survival_liters=survival_liters,
-        ndmi=ndmi,
-        crop_type=crop_type,
-    )
-    audio_b64 = synthesize_kannada_gtts(advisory_kn)
-    if audio_b64:
-        return audio_b64, "audio/mpeg", "gtts_kn", advisory_kn
-    return None, "text/plain", "browser_tts", advisory_kn
-
-
 def generate_voice_advisory(
     farmer_name: str,
     crop_type: str,
@@ -141,15 +81,13 @@ def generate_voice_advisory(
     survival_liters: float,
     ndvi: float,
     ndmi: float,
-) -> tuple[str | None, str]:
-    """Compatibility wrapper returning (audio_base64, advisory_text_kn)."""
-    audio_b64, _mime, _src, advisory_kn = generate_tts_advisory(
-        farmer_name=farmer_name,
-        crop_type=crop_type,
+) -> tuple[None, str]:
+    """Text-only Kannada advisory helper returning (None, advisory_text_kn)."""
+    advisory_kn = build_kannada_advisory_text(
         drought_stage=drought_stage,
         et0=et0,
         survival_liters=survival_liters,
-        ndvi=ndvi,
         ndmi=ndmi,
+        crop_type=crop_type,
     )
-    return audio_b64, advisory_kn
+    return None, advisory_kn

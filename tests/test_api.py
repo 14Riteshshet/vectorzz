@@ -13,7 +13,7 @@ import math
 import uuid
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -23,7 +23,7 @@ from backend.config import get_settings
 from backend.database import init_db
 from backend.main import app
 from backend.pdf_gen import generate_pmfby_pdf
-from backend.tts import build_kannada_advisory_text, generate_tts_advisory
+from backend.tts import build_kannada_advisory_text
 
 # ── A valid Karnataka polygon (Madhugiri area) ────────────────────────────────
 VALID_POLYGON = [
@@ -71,6 +71,8 @@ def anyio_backend():
 @pytest.fixture
 async def async_client():
     """Initialise DB tables and provide an async HTTPX client wrapping FastAPI."""
+    if hasattr(app.state, "limiter"):
+        app.state.limiter.enabled = False
     await init_db()
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -268,8 +270,7 @@ async def test_fallback_cache_taluk_trajectories(
         "polygon_coordinates": poly,
         "use_fallback": True,
     }
-    with patch("backend.tts.synthesize_kannada_gtts", return_value="ZmFrZS1tcDM="):
-        resp = await async_client.post("/api/analyze-plot", json=payload)
+    resp = await async_client.post("/api/analyze-plot", json=payload)
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
@@ -287,9 +288,8 @@ async def test_fallback_cache_taluk_trajectories(
     else:
         assert ts["stress_onset_date"] is None
 
-    assert data["audio_base64"] == "ZmFrZS1tcDM="
-    assert data["audio_mime"] == "audio/mpeg"
-    assert data["audio_source"] == "gtts_kn"
+    assert data["audio_base64"] is None
+    assert data["audio_source"] == "text_only"
     assert "ರಾಗಿ" in data["drought"]["recommendation_kn"]
 
 
@@ -337,10 +337,7 @@ async def test_dossier_endpoint_and_verify_roundtrip(
     async_client: AsyncClient, tmp_path: Path
 ):
     """Full end-to-end dossier generation, /api/plots/{id}/dossier, /api/verify, and PDF download."""
-    with (
-        patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)),
-        patch("backend.tts.synthesize_kannada_gtts", return_value=None),
-    ):
+    with patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -398,43 +395,43 @@ def test_kannada_localized_crop_names_and_clean_sentences():
         assert text.count(".") >= 3
 
 
-def test_gtts_kn_audio_success_and_offline_fallback():
-    """gTTS returns spoken MP3 when online, and clean browser_tts mode when offline."""
-    fake_tts = MagicMock()
-    fake_tts.write_to_fp.side_effect = lambda buf: buf.write(b"ID3-fake-mp3")
+@pytest.mark.anyio
+async def test_photo_attachment_with_preset_cache_and_pdf_embedding(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Photo attached in preset cache (use_fallback=True) saves image, hashes, and embeds in PDF."""
+    buf = io.BytesIO()
+    PILImage.new("RGB", (48, 36), color=(160, 100, 50)).save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    expected_sha = hashlib.sha256(png_bytes).hexdigest()
+    photo_b64 = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
 
-    with patch("backend.tts.gTTS", return_value=fake_tts) as mock_gtts:
-        audio_b64, mime, src, text_kn = generate_tts_advisory(
-            farmer_name="Ramaiah",
-            crop_type="Ragi",
-            drought_stage="severe_drought",
-            et0=5.8,
-            survival_liters=234946.0,
-            ndvi=0.09,
-            ndmi=-0.46,
-        )
-    mock_gtts.assert_called_once()
-    assert mock_gtts.call_args.kwargs["lang"] == "kn"
-    assert base64.b64decode(audio_b64) == b"ID3-fake-mp3"
-    assert mime == "audio/mpeg"
-    assert src == "gtts_kn"
-    assert "ರಾಗಿ" in text_kn
+    pdf_dir = tmp_path / "pdfs"
+    photo_dir = tmp_path / "photos"
+    payload = {
+        **VALID_PAYLOAD,
+        "use_fallback": True,
+        "photo_base64": photo_b64,
+        "photo_filename": "kharif_plot.png",
+        "photo_lat": 13.6621,
+        "photo_lon": 77.2017,
+        "photo_timestamp": "2026-10-30T11:00:00Z",
+    }
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(pdf_dir)),
+        patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)),
+    ):
+        resp = await async_client.post("/api/analyze-plot", json=payload)
 
-    # Offline / gTTS failure returns None (no dummy WAV beep) + browser_tts signal
-    with patch("backend.tts.gTTS", side_effect=RuntimeError("offline")):
-        audio_b64_off, mime_off, src_off, text_kn_off = generate_tts_advisory(
-            farmer_name="Basavaraj",
-            crop_type="Groundnut",
-            drought_stage="moderate_drought",
-            et0=5.4,
-            survival_liters=197834.0,
-            ndvi=0.18,
-            ndmi=-0.31,
-        )
-    assert audio_b64_off is None
-    assert mime_off == "text/plain"
-    assert src_off == "browser_tts"
-    assert "ಶೇಂಗಾ" in text_kn_off
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["satellite"]["data_source"] == "fallback_cache"
+    assert data["photo_attached"] is True
+    assert data["photo_sha256"] == expected_sha
+    assert data["geolock_status"] == "VERIFIED_IN_REGION"
+    assert data["geolock_distance_km"] is not None and data["geolock_distance_km"] <= 5.0
+    assert (photo_dir / f"{data['plot_id']}.png").exists()
+    assert data["pdf_sha256"] and len(data["pdf_sha256"]) == 64
 
 
 # ── /api/verify/{sha256_hash} ─────────────────────────────────────────────────
@@ -761,6 +758,97 @@ async def test_geotagged_photo_upload_and_pdf_embedding(
         )
         assert auth_photo.status_code == 200
         assert auth_photo.content == png_bytes
+
+
+@pytest.mark.anyio
+async def test_photo_geolock_statuses_and_exif_extraction(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Verify EXIF GPS extraction, VERIFIED_IN_REGION, NEARBY_REGION, OUTSIDE_REGION, and MISSING_GPS."""
+    pdf_dir = tmp_path / "pdfs"
+    photo_dir = tmp_path / "photos"
+
+    # Build a JPEG with EXIF GPS pointing to Madhugiri (13°39'43"N, 77°12'06"E)
+    exif_obj = PILImage.Exif()
+    exif_obj[0x8825] = {
+        1: "N",
+        2: (13.0, 39.0, 43.0),
+        3: "E",
+        4: (77.0, 12.0, 6.0),
+    }
+    exif_buf = io.BytesIO()
+    PILImage.new("RGB", (32, 32), color=(120, 140, 80)).save(
+        exif_buf, format="JPEG", exif=exif_obj
+    )
+    exif_b64 = "data:image/jpeg;base64," + base64.b64encode(exif_buf.getvalue()).decode("ascii")
+
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(pdf_dir)),
+        patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)),
+        patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+    ):
+        # 1. EXIF GPS auto-extracted -> VERIFIED_IN_REGION
+        r_exif = await async_client.post(
+            "/api/analyze-plot",
+            json={
+                **VALID_PAYLOAD,
+                "photo_base64": exif_b64,
+                "photo_filename": "exif.jpg",
+            },
+        )
+        assert r_exif.status_code == 200, r_exif.text
+        d_exif = r_exif.json()
+        assert d_exif["geolock_status"] == "VERIFIED_IN_REGION"
+        assert d_exif["region_match"] is True
+        assert d_exif["distance_km"] is not None and d_exif["distance_km"] < 2.0
+        assert d_exif["photo_attached"] is True
+
+        # 2. Nearby GPS (~18 km) -> DISTRICT_MATCH_NEARBY
+        r_near = await async_client.post(
+            "/api/analyze-plot",
+            json={
+                **VALID_PAYLOAD,
+                "photo_lat": 13.52,
+                "photo_lon": 77.23,
+            },
+        )
+        assert r_near.status_code == 200
+        d_near = r_near.json()
+        assert d_near["geolock_status"] == "DISTRICT_MATCH_NEARBY"
+        assert d_near["region_match"] is True
+        assert 5.0 < d_near["geolock_distance_km"] <= 35.0
+        assert d_near["photo_attached"] is False
+
+        # 3. City / Far GPS (Bengaluru) -> OUTSIDE_REGION_WARNING
+        r_far = await async_client.post(
+            "/api/analyze-plot",
+            json={
+                **VALID_PAYLOAD,
+                "photo_lat": 12.9716,
+                "photo_lon": 77.5946,
+            },
+        )
+        assert r_far.status_code == 200
+        d_far = r_far.json()
+        assert d_far["geolock_status"] == "OUTSIDE_REGION_WARNING"
+        assert d_far["region_match"] is False
+        assert d_far["geolock_distance_km"] > 35.0
+
+        # 4. Missing GPS -> MISSING_GPS (and strict allow_missing_gps=False rejects)
+        r_miss = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
+        assert r_miss.status_code == 200
+        d_miss = r_miss.json()
+        assert d_miss["geolock_status"] == "MISSING_GPS"
+        assert d_miss["region_match"] is False
+        assert d_miss["distance_km"] is None
+
+        r_strict = await async_client.post(
+            "/api/analyze-plot",
+            json={**VALID_PAYLOAD, "allow_missing_gps": False},
+        )
+        assert r_strict.status_code == 422
 
 
 @pytest.mark.anyio
