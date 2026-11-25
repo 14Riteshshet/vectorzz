@@ -1,7 +1,7 @@
 """
 SookshmaJal – FastAPI integration & component tests.
 Tests /health, /api/analyze-plot (mocked & offline cache), time-series payload,
-PMFBY PDF dossier generation + SHA-256/QR verification, and Sarvam voice fallback.
+PMFBY PDF dossier generation + SHA-256/QR verification, and Kannada gTTS advisory.
 """
 
 from __future__ import annotations
@@ -10,22 +10,20 @@ import base64
 import hashlib
 import io
 import math
+import uuid
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 from httpx import ASGITransport, AsyncClient
 from PIL import Image as PILImage
 
 from backend.config import get_settings
-
 from backend.database import init_db
 from backend.main import app
 from backend.pdf_gen import generate_pmfby_pdf
-from backend.voice import generate_voice_advisory
-from backend.voice import settings as voice_settings
+from backend.tts import build_kannada_advisory_text, generate_tts_advisory
 
 # ── A valid Karnataka polygon (Madhugiri area) ────────────────────────────────
 VALID_POLYGON = [
@@ -112,7 +110,8 @@ async def test_analyze_plot_success(async_client: AsyncClient):
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "ಬರ ಎಚ್ಚರಿಕೆ")),
         patch(
-            "backend.main.generate_pmfby_pdf", return_value=("/tmp/test.pdf", "a" * 64)
+            "backend.main.generate_pmfby_pdf",
+            return_value=("/tmp/test.pdf", uuid.uuid4().hex * 2),
         ),
     ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
@@ -224,7 +223,7 @@ async def test_analyze_plot_centroid_computed(async_client: AsyncClient):
         patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "")),
-        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", "b" * 64)),
+        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", uuid.uuid4().hex * 2)),
     ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
 
@@ -269,7 +268,8 @@ async def test_fallback_cache_taluk_trajectories(
         "polygon_coordinates": poly,
         "use_fallback": True,
     }
-    resp = await async_client.post("/api/analyze-plot", json=payload)
+    with patch("backend.tts.synthesize_kannada_gtts", return_value="ZmFrZS1tcDM="):
+        resp = await async_client.post("/api/analyze-plot", json=payload)
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
@@ -287,10 +287,10 @@ async def test_fallback_cache_taluk_trajectories(
     else:
         assert ts["stress_onset_date"] is None
 
-    # Playable WAV audio fallback is always returned when SARVAM_API_KEY is unset
-    assert data["audio_base64"] is not None
-    decoded_audio = base64.b64decode(data["audio_base64"])
-    assert decoded_audio[:4] == b"RIFF"
+    assert data["audio_base64"] == "ZmFrZS1tcDM="
+    assert data["audio_mime"] == "audio/mpeg"
+    assert data["audio_source"] == "gtts_kn"
+    assert "ರಾಗಿ" in data["drought"]["recommendation_kn"]
 
 
 # ── PDF Dossier Generation & SHA-256 / QR Verification ────────────────────────
@@ -337,7 +337,10 @@ async def test_dossier_endpoint_and_verify_roundtrip(
     async_client: AsyncClient, tmp_path: Path
 ):
     """Full end-to-end dossier generation, /api/plots/{id}/dossier, /api/verify, and PDF download."""
-    with patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)):
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)),
+        patch("backend.tts.synthesize_kannada_gtts", return_value=None),
+    ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -370,13 +373,38 @@ async def test_dossier_endpoint_and_verify_roundtrip(
         assert dl_resp.content.startswith(b"%PDF")
 
 
-# ── Voice Advisory Fallback Tests ─────────────────────────────────────────────
+# ── Kannada Advisory & gTTS Tests ────────────────────────────────────────────
 
 
-def test_voice_fallback_without_api_key():
-    """Missing SARVAM_API_KEY returns valid playable WAV audio and Kannada text."""
-    with patch.object(voice_settings, "SARVAM_API_KEY", ""):
-        audio_b64, text_kn = generate_voice_advisory(
+def test_kannada_localized_crop_names_and_clean_sentences():
+    """Kannada advisory uses localized crop names without raw English acronyms."""
+    expected_crops = {
+        "Ragi": "ರಾಗಿ",
+        "Groundnut": "ಶೇಂಗಾ",
+        "Maize": "ಮೆಕ್ಕೆಜೋಳ",
+        "Pigeon Pea": "ತೊಗರಿ",
+    }
+    for en_crop, kn_crop in expected_crops.items():
+        text = build_kannada_advisory_text(
+            drought_stage="severe_drought",
+            et0=5.8,
+            survival_liters=234946.0,
+            ndmi=-0.46,
+            crop_type=en_crop,
+        )
+        assert kn_crop in text
+        assert "NDMI" not in text
+        assert "PMFBY" not in text
+        assert text.count(".") >= 3
+
+
+def test_gtts_kn_audio_success_and_offline_fallback():
+    """gTTS returns spoken MP3 when online, and clean browser_tts mode when offline."""
+    fake_tts = MagicMock()
+    fake_tts.write_to_fp.side_effect = lambda buf: buf.write(b"ID3-fake-mp3")
+
+    with patch("backend.tts.gTTS", return_value=fake_tts) as mock_gtts:
+        audio_b64, mime, src, text_kn = generate_tts_advisory(
             farmer_name="Ramaiah",
             crop_type="Ragi",
             drought_stage="severe_drought",
@@ -385,20 +413,16 @@ def test_voice_fallback_without_api_key():
             ndvi=0.09,
             ndmi=-0.46,
         )
-    assert audio_b64 is not None
-    raw_wav = base64.b64decode(audio_b64)
-    assert raw_wav[:4] == b"RIFF"
-    assert raw_wav[8:12] == b"WAVE"
-    assert "PMFBY" in text_kn
+    mock_gtts.assert_called_once()
+    assert mock_gtts.call_args.kwargs["lang"] == "kn"
+    assert base64.b64decode(audio_b64) == b"ID3-fake-mp3"
+    assert mime == "audio/mpeg"
+    assert src == "gtts_kn"
+    assert "ರಾಗಿ" in text_kn
 
-
-def test_voice_fallback_on_sarvam_timeout():
-    """Sarvam API timeout gracefully falls back to playable WAV audio without raising."""
-    with (
-        patch.object(voice_settings, "SARVAM_API_KEY", "dummy-key"),
-        patch("backend.voice.requests.post", side_effect=requests.Timeout("timed out")),
-    ):
-        audio_b64, text_kn = generate_voice_advisory(
+    # Offline / gTTS failure returns None (no dummy WAV beep) + browser_tts signal
+    with patch("backend.tts.gTTS", side_effect=RuntimeError("offline")):
+        audio_b64_off, mime_off, src_off, text_kn_off = generate_tts_advisory(
             farmer_name="Basavaraj",
             crop_type="Groundnut",
             drought_stage="moderate_drought",
@@ -407,10 +431,10 @@ def test_voice_fallback_on_sarvam_timeout():
             ndvi=0.18,
             ndmi=-0.31,
         )
-    assert audio_b64 is not None
-    raw_wav = base64.b64decode(audio_b64)
-    assert raw_wav[:4] == b"RIFF"
-    assert len(text_kn) > 10
+    assert audio_b64_off is None
+    assert mime_off == "text/plain"
+    assert src_off == "browser_tts"
+    assert "ಶೇಂಗಾ" in text_kn_off
 
 
 # ── /api/verify/{sha256_hash} ─────────────────────────────────────────────────
@@ -478,7 +502,7 @@ async def test_drought_stage_severe(async_client: AsyncClient):
         patch("backend.main.fetch_sentinel2_indices", return_value=sat_data),
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "")),
-        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", "c" * 64)),
+        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", uuid.uuid4().hex * 2)),
     ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
     assert resp.status_code == 200
@@ -493,7 +517,7 @@ async def test_drought_stage_healthy(async_client: AsyncClient):
         patch("backend.main.fetch_sentinel2_indices", return_value=sat_data),
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "")),
-        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", "d" * 64)),
+        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", uuid.uuid4().hex * 2)),
     ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
     assert resp.status_code == 200
@@ -596,7 +620,7 @@ async def test_analyze_plot_defaults_farmer_and_infers_taluk(async_client: Async
         patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "")),
-        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", "f" * 64)),
+        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/t.pdf", uuid.uuid4().hex * 2)),
     ):
         resp = await async_client.post("/api/analyze-plot", json=payload)
 

@@ -92,7 +92,7 @@
         </h1>
         <p class="hero-subtitle" id="hero-subtitle">
           Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres,
-          0–7 cm soil moisture, crop-stage borewell protection guidance, and a Sarvam AI Kannada voice advisory.
+          0–7 cm soil moisture, crop-stage borewell protection guidance, and a spoken Kannada voice advisory.
         </p>
 
         <!-- Taluk presets -->
@@ -504,14 +504,14 @@
             </div>
           </div>
 
-          <!-- Prominent Sarvam AI Kannada Voice Advisory Player -->
-          <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Sarvam AI Kannada voice advisory">
+          <!-- Spoken Kannada Voice Advisory Player -->
+          <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Spoken Kannada farm advisory">
             <div class="audio-header-row">
               <div class="audio-title-group">
                 <span class="audio-flag" aria-hidden="true">🔊</span>
                 <div>
-                  <div class="audio-title">ಕನ್ನಡ ಧ್ವನಿ ಸಲಹೆ — Sarvam AI Kannada Voice Advisory</div>
-                  <div class="audio-lang" id="audio-source-label">Sarvam AI · bulbul:v1 · ಕನ್ನಡ</div>
+                  <div class="audio-title">ಕನ್ನಡ ಧ್ವನಿ ಸಲಹೆ — Spoken Kannada Farm Advisory</div>
+                  <div class="audio-lang audio-status-pill" id="audio-source-label">Voice Status: Ready on analysis</div>
                 </div>
               </div>
               <div class="audio-controls">
@@ -519,15 +519,16 @@
                         aria-label="Play Kannada advisory audio" disabled>
                   ▶
                 </button>
-                <audio id="advisory-audio" controls aria-label="Kannada advisory audio">
+                <audio id="advisory-audio" controls style="display:none;" aria-label="Kannada advisory audio">
                   Your browser does not support the audio element.
                 </audio>
                 <button type="button" class="btn-secondary btn-speak-kn" id="btn-speak-kn"
-                        aria-label="Read Kannada text aloud via browser voice">
+                        aria-label="Listen to Kannada advisory">
                   🗣 Speak Kannada
                 </button>
               </div>
             </div>
+            <div class="advisory-metrics-chips" id="advisory-metrics-chips"></div>
             <div class="audio-kn-script" id="farmer-kn-script" lang="kn">
               Kannada stage-specific guidance will appear here after plot analysis.
             </div>
@@ -618,19 +619,20 @@
             </div>
           </div>
 
-          <!-- Annotated Time-Series Chart comparing 2026 vs Healthy Historical Baseline -->
+          <!-- Simple-Language Seasonal Audit Chart comparing 2026 vs Normal Healthy Year -->
           <div class="chart-container" aria-labelledby="officer-chart-title">
             <div class="chart-header-row">
               <h3 class="card-title" id="officer-chart-title" style="margin-bottom:0;">
-                <span aria-hidden="true">📈</span> 2026 Kharif Trajectory vs Healthy Baseline (Post-Harvest Audit)
+                <span aria-hidden="true">📈</span> Crop Health Over the Season vs Normal Year (Post-Harvest Proof)
               </h3>
-              <span class="forensic-badge" id="forensic-onset-badge">Forensic Timeline</span>
+              <span class="forensic-badge" id="forensic-onset-badge">Audit Trail</span>
             </div>
             <p class="card-subtitle" style="margin-top:var(--space-2);">
-              Tracks mid-season spectral collapse so regional officers can verify PMFBY drought claims even 60+ days after harvest or ploughing.
+              Compares this plot's 2026 crop condition and leaf moisture against a normal healthy season, proving when drought hit even 60+ days after harvest or late rain.
             </p>
-            <canvas id="officer-timeseries-chart" role="img" aria-label="Annotated time-series chart comparing 2026 NDVI, NDMI, NDRE against healthy historical baseline"></canvas>
+            <canvas id="officer-timeseries-chart" role="img" aria-label="Chart comparing normal healthy crop condition, actual 2026 crop condition, and leaf moisture trend"></canvas>
             <div class="forensic-summary" id="forensic-summary"></div>
+            <div class="officer-takeaway" id="officer-chart-takeaway"></div>
           </div>
 
           <!-- Prominent PMFBY Audit Dossier Action & Inline Verification -->
@@ -715,7 +717,7 @@
   <footer class="site-footer">
     <div class="container">
       <strong>SookshmaJal</strong> · Team VECTORZZ (Akshay, Ritesh, Sunil, Rohith) · Hackwarts 2026 AgriTech Track<br />
-      Sentinel-2 L2A · Open-Meteo FAO-56 ET₀ · Sarvam AI Kannada TTS · Tamper-Evident PMFBY Dossiers
+      Sentinel-2 L2A · Open-Meteo FAO-56 ET₀ · Spoken Kannada Voice Advisory · Tamper-Evident PMFBY Dossiers
     </div>
   </footer>
 

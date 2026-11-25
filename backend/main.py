@@ -61,7 +61,7 @@ from backend.schemas import (
     TimeSeriesData,
     VerifyDossierResponse,
 )
-from backend.voice import build_kannada_advisory_text, generate_voice_advisory
+from backend.tts import build_kannada_advisory_text, generate_voice_advisory
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -395,7 +395,7 @@ async def analyze_plot(
     - Fetches Sentinel-2 indices via Planetary Computer (or fallback cache)
     - Computes FAO-56 ET₀, precipitation, soil moisture, survival litres
     - Classifies drought stage
-    - Generates Kannada voice advisory (Sarvam AI or fallback text)
+    - Generates Kannada advisory text and spoken gTTS MP3 audio (with browser TTS fallback)
     - Generates PMFBY PDF dossier with SHA-256 hash + QR code
     - Persists FarmPlot, TelemetryLog, ClaimDossier records
     """
@@ -560,7 +560,7 @@ async def analyze_plot(
     db.add(db_telem)
     await db.flush()
 
-    # ── 5. Voice advisory ────────────────────────────────────────────────────
+    # ── 5. Voice advisory (gTTS Kannada + browser speechSynthesis fallback) ──
     audio_b64, advisory_kn = generate_voice_advisory(
         farmer_name=body.farmer_name,
         crop_type=body.crop_type,
@@ -573,11 +573,8 @@ async def analyze_plot(
     if advisory_kn:
         drought.recommendation_kn = advisory_kn
 
-    audio_source = (
-        "sarvam_bulbul_v1"
-        if (audio_b64 and settings.SARVAM_API_KEY)
-        else ("offline_wav_fallback" if audio_b64 else "text_only")
-    )
+    audio_mime = "audio/mpeg" if audio_b64 else "text/plain"
+    audio_source = "gtts_kn" if audio_b64 else "browser_tts"
 
     # ── 6. PMFBY PDF ─────────────────────────────────────────────────────────
     pdf_sha256: Optional[str] = None
@@ -619,20 +616,20 @@ async def analyze_plot(
         )
         pdf_download_url = f"{base_url}/api/pdf/{Path(pdf_path).name}"
 
-        # ClaimDossier record (omit local filesystem photo_path in stored JSON)
         stored_claim_payload = {k: v for k, v in claim_payload.items() if k != "photo_path"}
         pdf_size = Path(pdf_path).stat().st_size if Path(pdf_path).exists() else 0
-        db_claim = ClaimDossier(
-            plot_id=plot_id,
-            pdf_path=pdf_path,
-            sha256_hash=pdf_sha256,
-            pdf_size_bytes=pdf_size,
-            claim_payload=stored_claim_payload,
-            is_verified=True,
-            verified_at=datetime.utcnow(),
-        )
-        db.add(db_claim)
-        await db.flush()
+        async with db.begin_nested():
+            db_claim = ClaimDossier(
+                plot_id=plot_id,
+                pdf_path=pdf_path,
+                sha256_hash=pdf_sha256,
+                pdf_size_bytes=pdf_size,
+                claim_payload=stored_claim_payload,
+                is_verified=True,
+                verified_at=datetime.utcnow(),
+            )
+            db.add(db_claim)
+            await db.flush()
 
     except Exception as exc:
         logger.warning("PDF generation failed (non-fatal): %s", exc)
@@ -666,6 +663,7 @@ async def analyze_plot(
         time_series=time_series,
         irrigation_guidance=irrigation_guidance,
         audio_base64=audio_b64,
+        audio_mime=audio_mime,
         audio_source=audio_source,
         pdf_sha256=pdf_sha256,
         pdf_download_url=pdf_download_url,

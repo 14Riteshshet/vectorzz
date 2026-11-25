@@ -223,9 +223,9 @@ class AnalyzePlotResponse(BaseModel):
     hydromet: HydrometData
     time_series: TimeSeriesData = Field(default_factory=TimeSeriesData)
     irrigation_guidance: CropIrrigationGuidance | None = None
-    audio_base64: str | None = None  # Sarvam TTS Kannada advisory or WAV fallback
-    audio_mime: str = "audio/wav"
-    audio_source: str = "offline_wav_fallback"
+    audio_base64: str | None = None  # Spoken Kannada MP3 via gTTS when online
+    audio_mime: str = "audio/mpeg"
+    audio_source: str = "browser_tts"
     pdf_sha256: str | None = None
     pdf_download_url: str | None = None
     analysed_at: str

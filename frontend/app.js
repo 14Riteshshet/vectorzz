@@ -36,7 +36,7 @@ var TALUK_PRESETS = {
 var MODE_COPY = {
   farmer: {
     title: 'Precision Survival Water Coaching<br />for Tumakuru Farmers',
-    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a Sarvam AI Kannada voice advisory.'
+    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a spoken Kannada voice advisory.'
   },
   officer: {
     title: 'Post-Harvest Drought Verification<br />&amp; PMFBY Claim Monitor',
@@ -885,10 +885,26 @@ function renderResults(data) {
   document.getElementById('guidance-schedule').textContent =
     guidance.irrigation_schedule || drought.recommendation_en;
 
+  var $chips = document.getElementById('advisory-metrics-chips');
+  if ($chips) {
+    var cropKnMap = {
+      ragi: 'ರಾಗಿ', groundnut: 'ಶೇಂಗಾ', maize: 'ಮೆಕ್ಕೆಜೋಳ',
+      'pigeon pea': 'ತೊಗರಿ', togari: 'ತೊಗರಿ', tur: 'ತೊಗರಿ',
+      tomato: 'ಟೊಮೇಟೊ', sunflower: 'ಸೂರ್ಯಕಾಂತಿ', sorghum: 'ಜೋಳ',
+      cotton: 'ಹತ್ತಿ', rice: 'ಭತ್ತ'
+    };
+    var cropKn = cropKnMap[(data.crop_type || '').toLowerCase()] || data.crop_type;
+    $chips.innerHTML =
+      '<span class="advisory-chip">🌱 ' + escHtml(cropKn) + ' (' + escHtml(data.crop_type) + ')</span>' +
+      '<span class="advisory-chip">💧 7-Day Need: ' + Math.round(vsurv).toLocaleString('en-IN') + ' L</span>' +
+      '<span class="advisory-chip">🚿 Daily Ration: ~' + Math.round(dailyVsurv).toLocaleString('en-IN') + ' L/day</span>' +
+      '<span class="advisory-chip">🌡 Moisture Index: ' + sat.ndmi.toFixed(2) + '</span>';
+  }
+
   document.getElementById('farmer-kn-script').textContent =
     drought.recommendation_kn || drought.recommendation_en;
 
-  setupAudio(data.audio_base64, drought, data.audio_source);
+  setupAudio(data.audio_base64, drought, data.audio_source, data.audio_mime);
 
   // ── Regional Office Monitor fields ─────────────────────────────────────────
   document.getElementById('val-officer-stage').textContent = drought.stage_label;
@@ -952,20 +968,19 @@ function updateDossierUI(sha256, downloadUrl, isVerified, plotId, timestampIso) 
 }
 
 function renderForensicSummary(ts, sat) {
-  var $badge = document.getElementById('forensic-onset-badge');
-  var $sum   = document.getElementById('forensic-summary');
-  var dates  = ts.dates || [];
-  var ndvi   = ts.ndvi || [];
-  var base   = ts.baseline_ndvi || [];
+  var $badge    = document.getElementById('forensic-onset-badge');
+  var $sum      = document.getElementById('forensic-summary');
+  var $takeaway = document.getElementById('officer-chart-takeaway');
+  var dates     = ts.dates || [];
+  var ndvi      = ts.ndvi || [];
+  var base      = ts.baseline_ndvi || [];
 
   var maxDropPct = 0;
-  var peakBase = 0;
   for (var i = 0; i < Math.min(ndvi.length, base.length); i++) {
     if (base[i] > 0.1) {
       var drop = ((base[i] - ndvi[i]) / base[i]) * 100;
       if (drop > maxDropPct) {
         maxDropPct = drop;
-        peakBase = base[i];
       }
     }
   }
@@ -973,20 +988,33 @@ function renderForensicSummary(ts, sat) {
   if (ts.stress_onset_date) {
     var days = ts.days_since_stress_onset != null ? ts.days_since_stress_onset : 60;
     $badge.className = 'forensic-badge stress';
-    $badge.textContent = '⚠ Stress Onset: ' + ts.stress_onset_date + ' (' + days + 'd trail)';
+    $badge.textContent = '⚠ Drought Started: ' + ts.stress_onset_date + ' (' + days + 'd proof)';
     $sum.innerHTML =
-      '<span><strong>Mid-Season Stress Onset:</strong> ' + escHtml(ts.stress_onset_date) + '</span>' +
-      '<span><strong>Audit Horizon:</strong> ' + days + ' days tracked (60+ day post-harvest proof)</span>' +
-      '<span><strong>Peak Baseline Divergence:</strong> −' + maxDropPct.toFixed(0) + '% vs healthy (' + peakBase.toFixed(2) + ')</span>' +
+      '<span><strong>Drought Started:</strong> ' + escHtml(ts.stress_onset_date) + '</span>' +
+      '<span><strong>Crop Drop (%):</strong> −' + maxDropPct.toFixed(0) + '% below normal</span>' +
+      '<span><strong>Proof Window (Days):</strong> ' + days + ' days tracked (60+ day post-harvest proof)</span>' +
       '<span><strong>Cloud Cover:</strong> ' + Number(sat.cloud_cover_pct || 0).toFixed(1) + '%</span>';
+    if ($takeaway) {
+      $takeaway.className = 'officer-takeaway stress';
+      $takeaway.textContent =
+        'Takeaway: Crop condition dropped ' + maxDropPct.toFixed(0) + '% below a normal year starting ' +
+        ts.stress_onset_date + ' — this ' + days +
+        '-day satellite trail proves drought loss even after harvest or late rain.';
+    }
   } else {
     $badge.className = 'forensic-badge';
-    $badge.textContent = '✅ Within Healthy Baseline';
+    $badge.textContent = '✅ Healthy Season';
     $sum.innerHTML =
-      '<span><strong>Mid-Season Stress Onset:</strong> None detected</span>' +
-      '<span><strong>Trajectory Points:</strong> ' + dates.length + ' Kharif observations</span>' +
-      '<span><strong>Max Deviation:</strong> ' + maxDropPct.toFixed(0) + '% vs 5-yr baseline</span>' +
+      '<span><strong>Drought Started:</strong> None (Healthy)</span>' +
+      '<span><strong>Crop Drop (%):</strong> ' + maxDropPct.toFixed(0) + '% vs normal</span>' +
+      '<span><strong>Proof Window (Days):</strong> ' + dates.length + ' seasonal checks</span>' +
       '<span><strong>Cloud Cover:</strong> ' + Number(sat.cloud_cover_pct || 0).toFixed(1) + '%</span>';
+    if ($takeaway) {
+      $takeaway.className = 'officer-takeaway';
+      $takeaway.textContent =
+        'Takeaway: Crop health stayed close to a normal healthy year across all ' + dates.length +
+        ' satellite checks, with no drought trigger.';
+    }
   }
 }
 
@@ -1077,7 +1105,14 @@ function renderFarmerChart(ts) {
   });
 }
 
-// ── Chart.js: Regional Office Annotated Forensic Time-Series ─────────────────
+// ── Chart.js: Regional Office Simple-Language Crop & Moisture Audit Chart ────
+function toConditionPct(v) {
+  return Math.round(Math.max(0, Math.min(100, Number(v || 0) * 100)));
+}
+function toMoisturePct(v) {
+  return Math.round(Math.max(0, Math.min(100, ((Number(v || 0) + 0.6) / 1.0) * 100)));
+}
+
 function renderOfficerChart(ts, drought) {
   if (typeof Chart === 'undefined') return;
   var canvas = document.getElementById('officer-timeseries-chart');
@@ -1086,10 +1121,10 @@ function renderOfficerChart(ts, drought) {
   if (officerChart) officerChart.destroy();
 
   var dates    = ts.dates || [];
-  var ndvi     = ts.ndvi || [];
-  var baseNdvi = ts.baseline_ndvi || [];
-  var ndmi     = ts.ndmi || [];
-  var ndre     = ts.ndre || [];
+  var ndvi     = (ts.ndvi || []).map(toConditionPct);
+  var baseNdvi = (ts.baseline_ndvi || []).map(toConditionPct);
+  var ndmi     = (ts.ndmi || []).map(toMoisturePct);
+  var ndre     = (ts.ndre || []).map(toConditionPct);
   var onsetIdx = ts.stress_onset_index;
   var onsetDate = ts.stress_onset_date;
   var daysSince = ts.days_since_stress_onset;
@@ -1097,7 +1132,7 @@ function renderOfficerChart(ts, drought) {
   var isSevere = drought && drought.stage === 'severe_drought';
   var accentColor = isSevere ? '#B64400' : '#FF791B';
 
-  // Inline annotation plugin to mark mid-season stress onset for post-harvest audit
+  // Inline annotation plugin to mark when drought started for post-harvest proof
   var stressAnnotationPlugin = {
     id: 'stressOnsetMarker',
     afterDatasetsDraw: function(chart) {
@@ -1112,11 +1147,9 @@ function renderOfficerChart(ts, drought) {
 
       c.save();
 
-      // Shaded post-onset audit zone
       c.fillStyle = isSevere ? 'rgba(182, 68, 0, 0.08)' : 'rgba(255, 121, 27, 0.08)';
       c.fillRect(xPos, yScale.top, Math.max(0, rightX - xPos), yScale.bottom - yScale.top);
 
-      // Vertical dashed onset line
       c.beginPath();
       c.setLineDash([6, 4]);
       c.strokeStyle = accentColor;
@@ -1125,9 +1158,8 @@ function renderOfficerChart(ts, drought) {
       c.lineTo(xPos, yScale.bottom);
       c.stroke();
 
-      // Annotation pill label
-      var label = 'Stress Onset: ' + (onsetDate || dates[onsetIdx]) +
-        (daysSince ? ' (' + daysSince + 'd)' : '');
+      var label = 'Drought Started: ' + (onsetDate || dates[onsetIdx]) +
+        (daysSince ? ' (' + daysSince + 'd proof)' : '');
       c.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
       var textW = c.measureText(label).width;
       var padX = 8;
@@ -1161,7 +1193,7 @@ function renderOfficerChart(ts, drought) {
       labels: dates,
       datasets: [
         {
-          label: 'Healthy Historical Baseline (NDVI)',
+          label: 'Normal Healthy Crop (%)',
           data: baseNdvi,
           borderColor: '#0066CC',
           backgroundColor: 'rgba(0, 102, 204, 0.06)',
@@ -1171,7 +1203,7 @@ function renderOfficerChart(ts, drought) {
           pointRadius: 3
         },
         {
-          label: '2026 Plot NDVI',
+          label: 'Actual Crop Condition (%)',
           data: ndvi,
           borderColor: accentColor,
           backgroundColor: isSevere ? 'rgba(182, 68, 0, 0.12)' : 'rgba(255, 121, 27, 0.12)',
@@ -1181,7 +1213,7 @@ function renderOfficerChart(ts, drought) {
           pointRadius: 4
         },
         {
-          label: '2026 NDMI (Moisture)',
+          label: 'Leaf Moisture Trend (%)',
           data: ndmi,
           borderColor: '#1D1D1F',
           borderWidth: 2,
@@ -1189,7 +1221,7 @@ function renderOfficerChart(ts, drought) {
           pointRadius: 3
         },
         {
-          label: '2026 NDRE (Chlorophyll)',
+          label: 'Leaf Greenness (%)',
           data: ndre,
           borderColor: '#6E6E73',
           borderWidth: 2,
@@ -1211,18 +1243,24 @@ function renderOfficerChart(ts, drought) {
         tooltip: {
           callbacks: {
             label: function(item) {
-              return item.dataset.label + ': ' + Number(item.parsed.y).toFixed(3);
+              var val = Math.round(Number(item.parsed.y));
+              var note = val >= 50 ? 'Healthy' : (val >= 28 ? 'Moderate stress' : 'Severe stress');
+              return item.dataset.label + ': ' + val + '% (' + note + ')';
             }
           }
         }
       },
       scales: {
         y: {
-          min: -0.6,
-          max: 1.0,
+          min: 0,
+          max: 100,
           grid: { color: '#E8E8ED' },
-          ticks: { color: '#6E6E73', font: { size: 12 } },
-          title: { display: true, text: 'Spectral Index (−0.6 to +1.0)', color: '#6E6E73' }
+          ticks: {
+            color: '#6E6E73',
+            font: { size: 12 },
+            callback: function(v) { return v + '%'; }
+          },
+          title: { display: true, text: 'Crop & Moisture Health (0–100%)', color: '#6E6E73' }
         },
         x: {
           grid: { display: false },
@@ -1233,8 +1271,38 @@ function renderOfficerChart(ts, drought) {
   });
 }
 
-// ── Audio & Speech Synthesis ─────────────────────────────────────────────────
-function setupAudio(audioBase64, drought, audioSource) {
+// ── Audio & Speech Synthesis (gTTS MP3 + Browser Voice) ──────────────────────
+function speakKannadaBrowser(text) {
+  if (!('speechSynthesis' in window)) {
+    showToast('Browser speech synthesis unavailable.', 'warning');
+    return;
+  }
+  window.speechSynthesis.cancel();
+  var voices = window.speechSynthesis.getVoices();
+  var knVoice = voices.find(function(v) { return v.lang && v.lang.toLowerCase().startsWith('kn'); });
+  var hiVoice = voices.find(function(v) { return v.lang && v.lang.toLowerCase().startsWith('hi'); });
+
+  var sentences = String(text || '').split(/(?<=[.।!?])\s+/).filter(Boolean);
+  if (!sentences.length) sentences = [text];
+
+  sentences.forEach(function(sentence) {
+    var utter = new SpeechSynthesisUtterance(sentence);
+    if (knVoice) {
+      utter.voice = knVoice;
+      utter.lang = knVoice.lang;
+    } else if (hiVoice) {
+      utter.voice = hiVoice;
+      utter.lang = hiVoice.lang;
+    } else {
+      utter.lang = 'kn-IN';
+    }
+    utter.rate = 0.90;
+    window.speechSynthesis.speak(utter);
+  });
+  showToast('🗣 Reading Kannada advisory aloud', 'success');
+}
+
+function setupAudio(audioBase64, drought, audioSource, audioMime) {
   var $audio    = document.getElementById('advisory-audio');
   var $playBtn  = document.getElementById('btn-play-audio');
   var $srcLabel = document.getElementById('audio-source-label');
@@ -1243,33 +1311,21 @@ function setupAudio(audioBase64, drought, audioSource) {
   var knText = drought.recommendation_kn || drought.recommendation_en || '';
 
   $speakBtn.onclick = function() {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      var utter = new SpeechSynthesisUtterance(knText);
-      var voices = window.speechSynthesis.getVoices();
-      var knVoice = voices.find(function(v) { return v.lang && v.lang.startsWith('kn'); });
-      if (knVoice) utter.voice = knVoice;
-      utter.lang = 'kn-IN';
-      utter.rate = 0.92;
-      window.speechSynthesis.speak(utter);
-      showToast('🗣 Reading Kannada advisory aloud', 'success');
-    } else {
-      showToast('Browser speech synthesis unavailable.', 'warning');
-    }
+    speakKannadaBrowser(knText);
   };
 
   if (audioBase64) {
-    $audio.src = 'data:audio/wav;base64,' + audioBase64;
+    var mime = audioMime || 'audio/mpeg';
+    $audio.src = 'data:' + mime + ';base64,' + audioBase64;
+    $audio.style.display = 'inline-block';
     $audio.load();
     $playBtn.disabled = false;
     $playBtn.textContent = '▶';
-    $srcLabel.textContent = audioSource === 'sarvam_bulbul_v1'
-      ? 'Sarvam AI · bulbul:v1 · ಕನ್ನಡ'
-      : 'Offline Playable WAV Fallback · ಕನ್ನಡ ಸಲಹೆ';
+    $srcLabel.textContent = '🔊 Spoken Kannada Audio Ready (gTTS · ಕನ್ನಡ)';
 
     $playBtn.onclick = function() {
       if ($audio.paused) {
-        $audio.play().catch(console.warn);
+        $audio.play().catch(function() { speakKannadaBrowser(knText); });
         $playBtn.textContent = '⏸';
       } else {
         $audio.pause();
@@ -1278,9 +1334,13 @@ function setupAudio(audioBase64, drought, audioSource) {
     };
     $audio.onended = function() { $playBtn.textContent = '▶'; };
   } else {
+    $audio.pause();
+    $audio.removeAttribute('src');
+    $audio.style.display = 'none';
     $playBtn.disabled = false;
-    $srcLabel.textContent = 'Browser Speech Synthesis (offline fallback)';
-    $playBtn.onclick = $speakBtn.onclick;
+    $playBtn.textContent = '▶';
+    $srcLabel.textContent = '🗣 Browser Kannada Speech Ready (Click ▶ or Speak Kannada)';
+    $playBtn.onclick = function() { speakKannadaBrowser(knText); };
   }
 }
 

@@ -14,11 +14,6 @@ class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = "sqlite+aiosqlite:///./sookshmajal.db"
 
-    # ── Sarvam AI ─────────────────────────────────────────────────────────────
-    SARVAM_API_KEY: str = ""
-    SARVAM_TTS_MODEL: str = "bulbul:v1"
-    SARVAM_TRANSLATE_MODEL: str = "sarvam-translate:v1"
-
     # ── CORS ──────────────────────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
 
