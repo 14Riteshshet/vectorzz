@@ -845,6 +845,41 @@ function initUI() {
   if ('speechSynthesis' in window) {
     window.speechSynthesis.onvoiceschanged = function() { window.speechSynthesis.getVoices(); };
   }
+
+  // ── PMFBY Guidelines Tabs & Live Estimators ───────────────────────────────
+  document.querySelectorAll('.pmfby-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      var target = tab.dataset.pmfbyTab || 'all';
+      document.querySelectorAll('.pmfby-tab').forEach(function(t) {
+        var active = t === tab;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.pmfby-card').forEach(function(card) {
+        card.style.display = (target === 'all' || card.dataset.pmfbyCard === target) ? 'flex' : 'none';
+      });
+    });
+  });
+
+  ['area-acres', 'crop-type', 'taluk', 'survey-no', 'irrigation-source'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', function() { updatePmfbyGuidelinesUI(currentResult); });
+      el.addEventListener('change', function() { updatePmfbyGuidelinesUI(currentResult); });
+    }
+  });
+
+  var $trustVerifyBtn = document.getElementById('btn-trust-verify');
+  if ($trustVerifyBtn) {
+    $trustVerifyBtn.addEventListener('click', function() {
+      if (!currentResult || !currentResult.pdf_sha256) return;
+      openModal($modal);
+      document.getElementById('verify-hash-input').value = currentResult.pdf_sha256;
+      document.getElementById('btn-verify-hash').click();
+    });
+  }
+
+  updatePmfbyGuidelinesUI(null);
 }
 
 // ── Mode Switcher Logic ──────────────────────────────────────────────────────
@@ -1011,6 +1046,8 @@ function renderResults(data) {
 
   document.getElementById('farmer-kn-script').textContent =
     drought.recommendation_kn || drought.recommendation_en;
+
+  updatePmfbyGuidelinesUI(data);
 
   // ── Regional Office Monitor fields ─────────────────────────────────────────
   document.getElementById('val-officer-stage').textContent = drought.stage_label;
@@ -1569,6 +1606,113 @@ function escHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── PMFBY Guidelines, Payout Estimator & Live Checklist ──────────────────────
+var CROP_SCALE_PER_ACRE = {
+  ragi: 45000,
+  groundnut: 45000,
+  maize: 42000,
+  tomato: 65000,
+  cotton: 52000,
+  rice: 58000,
+  sunflower: 40000,
+  sorghum: 38000
+};
+
+function updatePmfbyGuidelinesUI(analysisData) {
+  var areaEl = document.getElementById('area-acres');
+  var cropEl = document.getElementById('crop-type');
+  var talukEl = document.getElementById('taluk');
+  var surveyEl = document.getElementById('survey-no');
+  var irrEl = document.getElementById('irrigation-source');
+
+  var acres = parseFloat(areaEl && areaEl.value ? areaEl.value : '2.5');
+  if (isNaN(acres) || acres <= 0) acres = 2.5;
+  var crop = (analysisData && analysisData.crop_type) || (cropEl && cropEl.value) || 'Ragi';
+  var taluk = (analysisData && analysisData.taluk) || (talukEl && talukEl.value) || '';
+  var surveyNo = (analysisData && analysisData.survey_no) || (surveyEl && surveyEl.value.trim()) || '';
+  var irrSource = (analysisData && analysisData.irrigation_source) || (irrEl && irrEl.value) || 'Purely Rain-Fed';
+
+  var cropKey = crop.toLowerCase();
+  var scalePerAcre = CROP_SCALE_PER_ACRE[cropKey] || 45000;
+  var isCommercial = cropKey === 'tomato' || cropKey === 'cotton';
+  var farmerRate = isCommercial ? 0.05 : 0.02;
+  var actuarialRate = isCommercial ? 0.12 : 0.10;
+
+  var sumInsured = Math.round(acres * scalePerAcre);
+  var farmerPrem = Math.round(sumInsured * farmerRate);
+  var govtSubsidy = Math.max(0, Math.round(sumInsured * actuarialRate) - farmerPrem);
+  var minTrigger = Math.round(sumInsured * 0.25);
+  var maxTrigger = Math.round(sumInsured * 0.60);
+
+  var $sub = document.getElementById('pmfby-estimator-subtitle');
+  if ($sub) {
+    $sub.textContent = '💰 Dynamic Plot Payout Estimator (' + acres.toFixed(1) + ' ac · ' + crop + ')';
+  }
+  var $sumEl = document.getElementById('est-sum-insured');
+  var $rateEl = document.getElementById('est-rate-label');
+  var $premEl = document.getElementById('est-farmer-premium');
+  var $subEl = document.getElementById('est-govt-subsidy');
+  var $rngEl = document.getElementById('est-claim-range');
+  if ($sumEl) $sumEl.textContent = '₹' + sumInsured.toLocaleString('en-IN');
+  if ($rateEl) $rateEl.textContent = 'Farmer Share (' + (farmerRate * 100).toFixed(1) + '%)';
+  if ($premEl) $premEl.textContent = '₹' + farmerPrem.toLocaleString('en-IN');
+  if ($subEl) $subEl.textContent = '₹' + govtSubsidy.toLocaleString('en-IN');
+  if ($rngEl) $rngEl.textContent = '₹' + minTrigger.toLocaleString('en-IN') + ' – ₹' + maxTrigger.toLocaleString('en-IN');
+
+  var $list = document.getElementById('pmfby-live-checklist');
+  if ($list) {
+    var hasCrop = Boolean(cropEl && cropEl.value) || Boolean(analysisData);
+    var hasLoc = Boolean(taluk) || Boolean(surveyNo);
+    var hasGps = analysisData
+      ? (analysisData.geolock_status === 'VERIFIED_IN_REGION' || analysisData.geolock_status === 'DISTRICT_MATCH_NEARBY')
+      : Boolean(capturedPhotoData && capturedPhotoData.lat != null && !capturedPhotoData.isMismatchDemo);
+    var gpsWarn = analysisData
+      ? analysisData.geolock_status
+      : (capturedPhotoData && capturedPhotoData.isMismatchDemo ? 'OUTSIDE_REGION_WARNING' : (hasGps ? 'GPS Locked' : 'Pending GPS'));
+
+    var deficitStatus = analysisData
+      ? (analysisData.pmfby_eligible || 'Evaluated')
+      : 'Run Analyse Plot to check satellite deficit';
+    var deficitPass = analysisData && analysisData.drought && analysisData.drought.stage !== 'healthy';
+
+    var items = [
+      { ok: hasCrop, text: hasCrop ? ('Notified Crop: ' + crop) : 'Select a notified crop (e.g. Ragi, Groundnut)' },
+      { ok: hasLoc, text: hasLoc ? ('Taluk / Survey: ' + (taluk || 'Tumakuru') + (surveyNo ? ' · Sy. ' + surveyNo : '')) : 'Select Taluk or Bhoomi Survey No.' },
+      { ok: Boolean(irrSource), text: 'Water Source: ' + irrSource },
+      { ok: hasGps, text: 'Field Photo GPS: ' + gpsWarn },
+      { ok: deficitPass, text: 'Moisture Deficit Check: ' + deficitStatus }
+    ];
+
+    $list.innerHTML = items.map(function(it) {
+      return '<li class="pmfby-check-item ' + (it.ok ? 'pass' : 'warn') + '">' +
+        '<span>' + (it.ok ? '✅' : '⚠️') + '</span>' +
+        '<span>' + escHtml(it.text) + '</span>' +
+      '</li>';
+    }).join('');
+  }
+
+  var $dId = document.getElementById('trust-dossier-id');
+  var $pHash = document.getElementById('trust-photo-hash');
+  var $dHash = document.getElementById('trust-dossier-hash');
+  var $satTs = document.getElementById('trust-sat-timestamp');
+  var $vBtn = document.getElementById('btn-trust-verify');
+  if ($dId && $pHash && $dHash && $satTs) {
+    if (analysisData) {
+      $dId.textContent = analysisData.plot_id || '—';
+      $pHash.textContent = analysisData.photo_sha256 || 'No camera photo uploaded';
+      $dHash.textContent = analysisData.pdf_sha256 || 'Pending PDF generation';
+      $satTs.textContent = (analysisData.satellite && analysisData.satellite.scene_date) || analysisData.analysed_at || '—';
+      if ($vBtn) $vBtn.disabled = !analysisData.pdf_sha256;
+    } else {
+      $dId.textContent = 'Run Analyse Plot to generate';
+      $pHash.textContent = '—';
+      $dHash.textContent = '—';
+      $satTs.textContent = '—';
+      if ($vBtn) $vBtn.disabled = true;
+    }
+  }
 }
 
 // ── Officer Auth Helpers ─────────────────────────────────────────────────────

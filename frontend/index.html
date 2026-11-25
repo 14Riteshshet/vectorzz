@@ -682,6 +682,112 @@
         </div><!-- /#officer-view -->
 
       </section>
+
+      <!-- ── PMFBY Official Guidelines, Eligibility & Trust Assurance ── -->
+      <section class="card pmfby-guidelines-section" id="pmfby-guidelines-section" aria-labelledby="pmfby-guidelines-title">
+        <div class="pmfby-guide-header">
+          <div>
+            <span class="pmfby-official-tag">🏛 PMFBY · YES-TECH Aligned · English + ಕನ್ನಡ</span>
+            <h2 class="card-title" id="pmfby-guidelines-title" style="margin-top:var(--space-2);margin-bottom:var(--space-1);">
+              PMFBY Official Guidelines, Eligibility &amp; Trust Assurance
+            </h2>
+            <p class="card-subtitle" style="margin-bottom:0;">
+              Transparent scheme rules, live plot readiness check, exact ₹ premium/payout estimate, and tamper-evident SHA-256 proof.
+            </p>
+          </div>
+          <div class="pmfby-tab-bar" role="tablist" aria-label="PMFBY guidelines sections">
+            <button type="button" class="pmfby-tab active" data-pmfby-tab="all" role="tab" aria-selected="true">All 4 Guides</button>
+            <button type="button" class="pmfby-tab" data-pmfby-tab="eligibility" role="tab" aria-selected="false">1. Eligibility</button>
+            <button type="button" class="pmfby-tab" data-pmfby-tab="payout" role="tab" aria-selected="false">2. Premium &amp; ₹</button>
+            <button type="button" class="pmfby-tab" data-pmfby-tab="dosdonts" role="tab" aria-selected="false">3. Do's &amp; Don'ts</button>
+            <button type="button" class="pmfby-tab" data-pmfby-tab="trust" role="tab" aria-selected="false">4. SHA-256 Proof</button>
+          </div>
+        </div>
+
+        <div class="pmfby-cards-grid">
+          <!-- Card 1: Who Is Eligible -->
+          <article class="pmfby-card" data-pmfby-card="eligibility">
+            <h3 class="pmfby-card-title">1. Who Is Eligible to Apply (PMFBY ಅರ್ಹತೆ)</h3>
+            <ul class="pmfby-list">
+              <li><strong>Eligible Cultivators:</strong> Both <strong>Landowners (ಖಾತೆದಾರ)</strong> with valid RTC/Pahani and <strong>Tenant Farmers / Sharecroppers (ಗೇಣಿದಾರ)</strong> cultivating notified crops on insurable land.</li>
+              <li><strong>Notified Crop &amp; Area Rule:</strong> Crop (Ragi, Groundnut, Maize, Red Gram/Tur) and Gram Panchayat / Hobli must be notified by the Karnataka State Government for the current Kharif/Rabi season.</li>
+              <li><strong>Mandatory Documents &amp; Timelines:</strong> Valid RTC / Survey No. (or tenancy agreement), Aadhaar-seeded active bank account for DBT payout, and enrollment before the seasonal cut-off date.</li>
+            </ul>
+            <div class="pmfby-subbox">
+              <div class="pmfby-subbox-title">✅ Live Plot Eligibility Check</div>
+              <ul class="pmfby-checklist" id="pmfby-live-checklist"></ul>
+            </div>
+          </article>
+
+          <!-- Card 2: Scheme Rules, Premium Caps & Payout Calculation -->
+          <article class="pmfby-card" data-pmfby-card="payout">
+            <h3 class="pmfby-card-title">2. Scheme Rules, Premium Caps &amp; Payout Calculation</h3>
+            <ul class="pmfby-list">
+              <li><strong>Farmer Premium Cap (PMFBY Standard):</strong> Only <strong>2.0% of Sum Insured</strong> for Kharif food &amp; oilseed crops (Ragi, Maize, Groundnut, Tur), <strong>1.5%</strong> for Rabi crops, and <strong>5.0%</strong> for commercial/horticultural crops — remaining actuarial premium is subsidized by Central &amp; State Govts.</li>
+              <li><strong>Indemnity &amp; Loss Triggers:</strong> Covers non-preventable risks including <strong>Mid-Season Adversity / Drought</strong>, <strong>Prevented Sowing</strong>, <strong>Localized Calamities</strong> (72-hr intimation), and <strong>Post-Harvest Losses</strong> (up to 14 days), assessed via <strong>YES-TECH (30%+ satellite weightage)</strong> &amp; CCE.</li>
+            </ul>
+            <div class="pmfby-subbox">
+              <div class="pmfby-subbox-title" id="pmfby-estimator-subtitle">💰 Dynamic Plot Payout Estimator</div>
+              <div class="pmfby-est-grid">
+                <div class="pmfby-est-item">
+                  <span>Sum Insured (ವಿಮಾ ಮೊತ್ತ)</span>
+                  <strong id="est-sum-insured">₹1,12,500</strong>
+                </div>
+                <div class="pmfby-est-item">
+                  <span id="est-rate-label">Farmer Share (2.0%)</span>
+                  <strong id="est-farmer-premium">₹2,250</strong>
+                </div>
+                <div class="pmfby-est-item">
+                  <span>Govt Subsidy (ಸಬ್ಸಿಡಿ)</span>
+                  <strong id="est-govt-subsidy">₹9,000</strong>
+                </div>
+                <div class="pmfby-est-item">
+                  <span>Est. Claim Trigger Range</span>
+                  <strong id="est-claim-range">₹28,125 – ₹67,500</strong>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Card 3: Do's & Don'ts / Rejection Triggers -->
+          <article class="pmfby-card" data-pmfby-card="dosdonts">
+            <h3 class="pmfby-card-title">3. Farmer Instructions &amp; Rejection Triggers (Do's &amp; Don'ts)</h3>
+            <p class="pmfby-card-lead">Avoid these 4 common reasons insurers reject PMFBY claims (ತಿರಸ್ಕಾರಕ್ಕೆ ಸಾಮಾನ್ಯ ಕಾರಣಗಳು):</p>
+            <ul class="pmfby-list pmfby-warn-list">
+              <li><strong>(a) Crop Mismatch:</strong> Do not insure a different crop than what is actually sown on your RTC / field — insurers verify via satellite &amp; CCE.</li>
+              <li><strong>(b) Missing / Unverified GPS:</strong> Always attach a live geotagged field photo inside your taluk bounds; unverified or gallery photos risk rejection.</li>
+              <li><strong>(c) Late Reporting (&gt;72 Hours):</strong> Report localized calamities (inundation, hailstorm, dry-spell damage) within <strong>72 hours</strong> of occurrence.</li>
+              <li><strong>(d) Inactive / Non-DBT Bank Account:</strong> Ensure your Aadhaar is seeded and active for Direct Benefit Transfer (DBT) payouts.</li>
+            </ul>
+          </article>
+
+          <!-- Card 4: Why Trust This Platform -->
+          <article class="pmfby-card" data-pmfby-card="trust">
+            <h3 class="pmfby-card-title">4. Why Trust This Platform (Cryptographic &amp; Official Proof)</h3>
+            <p class="pmfby-card-lead">
+              Sentinel-2 satellite telemetry (<code>NDVI/NDMI</code>), Open-Meteo rainfall/ET₀, and your geotagged field photo are bundled into a <strong>SHA-256 cryptographic hash</strong> that cannot be altered after submission.
+            </p>
+            <div class="pmfby-subbox">
+              <div class="pmfby-subbox-title">🔐 Live Verification Proof Box</div>
+              <div class="pmfby-proof-rows">
+                <div><span>Dossier / Plot ID:</span> <code id="trust-dossier-id">Run Analyse Plot to generate</code></div>
+                <div><span>Photo SHA-256:</span> <code id="trust-photo-hash">—</code></div>
+                <div><span>Dossier SHA-256:</span> <code id="trust-dossier-hash">—</code></div>
+                <div><span>Satellite Timestamp:</span> <strong id="trust-sat-timestamp">—</strong></div>
+              </div>
+              <div class="pmfby-proof-actions">
+                <button type="button" class="btn-secondary" id="btn-trust-verify" style="padding:var(--space-2) var(--space-5);font-size:13px;" disabled>
+                  🔍 Verify Dossier Authenticity
+                </button>
+              </div>
+            </div>
+            <div class="pmfby-helpline-box">
+              <span><strong>Official Portal:</strong> <a href="https://pmfby.gov.in" target="_blank" rel="noreferrer">pmfby.gov.in</a> · <strong>Krishi Rakshak / KCC:</strong> <a href="tel:14447">14447</a></span>
+              <span class="pmfby-disclosure">SookshmaJal acts as an independent satellite &amp; evidence-verification assistant aligned with PMFBY/YES-TECH guidelines.</span>
+            </div>
+          </article>
+        </div>
+      </section>
       </div><!-- /#workspace-view -->
 
       <!-- ── Plots History Page ──────────────────────────────────── -->
