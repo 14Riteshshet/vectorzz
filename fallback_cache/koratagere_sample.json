@@ -1,21 +1,21 @@
 {
-  "_comment": "Pre-cached Sentinel-2 + hydromet payload for Koratagere taluk, Tumakuru district.",
-  "_source": "Planetary Computer sentinel-2-l2a 2026-10-15, scene S2A_30MXS_20261015",
+  "_comment": "Pre-cached Sentinel-2 + hydromet payload for Koratagere taluk, Tumakuru district (moderate stress trajectory).",
+  "_source": "Planetary Computer sentinel-2-l2a 2026-10-30, scene S2A_30MXS_20261030",
   "_coords": {"lat": 13.5225, "lon": 77.2365},
   "taluk": "Koratagere",
   "district": "Tumakuru",
   "state": "Karnataka",
-  "scene_date": "2026-10-15",
+  "scene_date": "2026-10-30",
   "cloud_cover_pct": 6.8,
   "data_source": "fallback_cache",
-  "ndvi": 0.19,
+  "ndvi": 0.18,
   "ndmi": -0.31,
   "ndre": 0.14,
   "satellite_bands": {
     "B04_red_mean": 1388,
-    "B08_nir_mean": 1920,
-    "B05_rededge_mean": 1580,
-    "B11_swir_mean": 3200
+    "B08_nir_mean": 1998,
+    "B05_rededge_mean": 1508,
+    "B11_swir_mean": 3793
   },
   "hydromet": {
     "et0_mm_day": 5.4,
@@ -28,5 +28,29 @@
   "stage_label": "Moderate Drought — Urgent Action Required",
   "recommendation_en": "Moderate drought stress. Apply deficit irrigation immediately. Contact taluk agricultural officer. Begin PMFBY documentation.",
   "recommendation_kn": "ಮಧ್ಯಮ ಬರ ಒತ್ತಡ. ತಕ್ಷಣ ನೀರಾವರಿ ಅಗತ್ಯ. ತಾಲ್ಲೂಕು ಕೃಷಿ ಅಧಿಕಾರಿಯನ್ನು ಸಂಪರ್ಕಿಸಿ. PMFBY ದಾಖಲಾತಿ ಪ್ರಾರಂಭಿಸಿ.",
-  "survival_liters_1acre_7day": 182000
+  "survival_liters_1acre_7day": 197834.0,
+  "time_series": {
+    "dates": [
+      "2026-06-15",
+      "2026-07-01",
+      "2026-07-15",
+      "2026-08-01",
+      "2026-08-15",
+      "2026-09-01",
+      "2026-09-15",
+      "2026-10-01",
+      "2026-10-15",
+      "2026-10-30"
+    ],
+    "ndvi": [0.22, 0.33, 0.45, 0.54, 0.51, 0.39, 0.31, 0.25, 0.2, 0.18],
+    "ndmi": [0.03, 0.08, 0.11, 0.09, 0.01, -0.14, -0.22, -0.27, -0.3, -0.31],
+    "ndre": [0.17, 0.25, 0.33, 0.37, 0.34, 0.26, 0.21, 0.18, 0.15, 0.14],
+    "baseline_ndvi": [0.22, 0.34, 0.48, 0.61, 0.68, 0.71, 0.69, 0.62, 0.52, 0.38],
+    "soil_moisture": [26.0, 28.0, 29.4, 27.1, 22.8, 18.4, 16.5, 15.2, 14.6, 14.2],
+    "et0": [4.1, 4.0, 3.9, 4.3, 4.7, 5.1, 5.3, 5.4, 5.5, 5.4],
+    "stress_onset_date": "2026-09-01",
+    "stress_onset_index": 5,
+    "days_since_stress_onset": 59,
+    "data_source": "fallback_cache"
+  }
 }

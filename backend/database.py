@@ -2,11 +2,11 @@
 SookshmaJal – Async database engine and session dependency.
 Supports SQLite (dev) and PostgreSQL (prod) via DATABASE_URL.
 """
+
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,

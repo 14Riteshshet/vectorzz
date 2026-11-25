@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="SookshmaJal – Zero-hardware Sentinel-2 satellite moisture &amp; FAO-56 ET₀ decision engine for drought survival and PMFBY crop-loss ground-truthing in Tumakuru, Karnataka. Team VECTORZZ · Hackwarts 2026." />
+  <meta name="description" content="SookshmaJal – Two-sided AgriTech drought decision engine: Water Guide &amp; Insurance Claim Monitor for Tumakuru, Karnataka. Team VECTORZZ · Hackwarts 2026." />
   <meta name="theme-color" content="#0066CC" />
 
-  <title>SookshmaJal — AgriTech Drought Engine · Team VECTORZZ</title>
+  <title>SookshmaJal — Water Guide &amp; Insurance Claim · Team VECTORZZ</title>
 
   <!-- Design tokens & styles -->
   <link rel="stylesheet" href="tokens.css" />
@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 </head>
 
-<body>
+<body data-mode="farmer">
   <a href="#main-content" class="skip-link">Skip to main content</a>
 
   <!-- ── Site Header ─────────────────────────────────────────────── -->
@@ -28,22 +28,47 @@
         <span class="logo-name">SookshmaJal</span>
         <span class="logo-team">by Team VECTORZZ</span>
       </a>
-      <div style="display:flex;align-items:center;gap:var(--space-5);flex-wrap:wrap;">
+
+      <!-- Segmented Mode Switcher -->
+      <div class="mode-switcher" role="tablist" aria-label="Dashboard mode switcher">
+        <button
+          type="button"
+          class="mode-segment active"
+          id="mode-btn-farmer"
+          data-mode="farmer"
+          role="tab"
+          aria-selected="true"
+        >
+          🌱 Water Guide
+        </button>
+        <button
+          type="button"
+          class="mode-segment"
+          id="mode-btn-officer"
+          data-mode="officer"
+          role="tab"
+          aria-selected="false"
+        >
+          🏛 Insurance Claim
+        </button>
+      </div>
+
+      <div class="header-actions">
         <span class="badge-hackathon" aria-label="Hackwarts 2026 AgriTech Track">Hackwarts 2026</span>
         <button
-          class="btn-secondary"
+          type="button"
+          class="btn-secondary header-btn"
           id="btn-open-verify"
           aria-haspopup="dialog"
           aria-controls="modal-verify"
-          style="padding:var(--space-2) var(--space-7);font-size:var(--text-base);min-height:var(--space-9);"
         >
           🔍 Verify PMFBY
         </button>
         <button
-          class="btn-secondary"
+          type="button"
+          class="btn-secondary header-btn"
           id="btn-view-plots"
           aria-expanded="false"
-          style="padding:var(--space-2) var(--space-7);font-size:var(--text-base);min-height:var(--space-9);"
         >
           🕒 History
         </button>
@@ -55,24 +80,33 @@
   <main id="main-content" role="main">
     <div class="container">
 
+      <div id="workspace-view">
       <!-- Hero -->
       <section class="hero" aria-labelledby="hero-title">
-        <p class="hero-eyebrow" aria-hidden="true">Sentinel-2 · FAO-56 ET₀ · PMFBY</p>
         <h1 class="hero-title" id="hero-title">
-          Satellite Drought Intelligence<br />for Tumakuru Farmers
+          Precision Survival Water Coaching<br />for Tumakuru Farmers
         </h1>
-        <p class="hero-subtitle">
-          Draw your farm plot or tap a preset. Get real-time NDVI, NDMI moisture indices,
-          FAO-56 water deficit, and a Kannada voice advisory — all in under 30 seconds,
-          zero hardware required.
+        <p class="hero-subtitle" id="hero-subtitle">
+          Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres,
+          0–7 cm soil moisture, crop-stage borewell protection guidance, and a Sarvam AI Kannada voice advisory.
         </p>
 
         <!-- Taluk presets -->
         <div class="preset-row" role="group" aria-label="One-tap Tumakuru taluk presets">
-          <button class="btn-preset" data-taluk="Chikkanayakanahalli"
+          <button type="button" class="btn-preset" data-taluk="Madhugiri"
+                  data-lat="13.6621" data-lon="77.2017"
+                  aria-pressed="false">
+            📍 Madhugiri <span class="preset-tag severe">Severe Stress</span>
+          </button>
+          <button type="button" class="btn-preset" data-taluk="Koratagere"
+                  data-lat="13.5225" data-lon="77.2365"
+                  aria-pressed="false">
+            📍 Koratagere <span class="preset-tag moderate">Moderate</span>
+          </button>
+          <button type="button" class="btn-preset" data-taluk="Chikkanayakanahalli"
                   data-lat="13.4318" data-lon="76.9336"
                   aria-pressed="false">
-            📍 Chikkanayakanahalli
+            📍 C.N. Halli <span class="preset-tag healthy">Mild / Normal</span>
           </button>
         </div>
       </section>
@@ -83,13 +117,12 @@
           <span class="icon" aria-hidden="true">🗺</span>
           Draw Your Farm Plot
         </h2>
-        <p style="font-size:var(--text-lg);color:var(--color-4);margin-bottom:var(--space-5);">
-          Use the polygon tool (▱) on the map to outline your plot, or tap a taluk preset above.
+        <p class="card-subtitle">
+          Use the polygon tool (▱) on the map to outline your plot, or tap a Tumakuru taluk preset above.
         </p>
         <div id="map" role="application" aria-label="Leaflet map — draw your farm plot polygon"></div>
-        <p id="polygon-status" role="status" aria-live="polite"
-           style="margin-top:var(--space-3);font-size:var(--text-base);color:var(--color-4);">
-          No polygon drawn yet. Use the draw tool on the map.
+        <p id="polygon-status" role="status" aria-live="polite" class="polygon-status">
+          No polygon drawn yet. Use the draw tool on the map or tap a preset.
         </p>
       </section>
 
@@ -100,15 +133,13 @@
           Plot Details
         </h2>
         <form id="analyze-form" novalidate aria-describedby="form-error-summary">
-          <div id="form-error-summary" role="alert" aria-live="assertive"
-               style="display:none;background:rgba(182,68,0,0.08);color:var(--color-3);padding:var(--space-5);border-radius:var(--space-9);margin-bottom:var(--space-5);font-size:var(--text-lg);">
-          </div>
+          <div id="form-error-summary" role="alert" aria-live="assertive" class="form-error-summary"></div>
 
           <div class="form-grid">
             <!-- Farmer name -->
             <div class="form-field">
               <label class="form-label" for="farmer-name">
-                Farmer Name <span aria-hidden="true" style="color:var(--color-3);">*</span>
+                Farmer Name <span aria-hidden="true" class="required-star">*</span>
               </label>
               <input
                 class="form-input" id="farmer-name" name="farmer_name"
@@ -122,14 +153,14 @@
             <!-- Crop type -->
             <div class="form-field">
               <label class="form-label" for="crop-type">
-                Crop Type <span aria-hidden="true" style="color:var(--color-3);">*</span>
+                Crop Type <span aria-hidden="true" class="required-star">*</span>
               </label>
               <select class="form-select" id="crop-type" name="crop_type"
                       required aria-required="true">
                 <option value="" disabled selected>Select crop…</option>
                 <option value="Ragi">Ragi (Finger Millet)</option>
-                <option value="Tomato">Tomato</option>
                 <option value="Groundnut">Groundnut</option>
+                <option value="Tomato">Tomato</option>
                 <option value="Sunflower">Sunflower</option>
                 <option value="Maize">Maize</option>
                 <option value="Sorghum">Sorghum</option>
@@ -142,7 +173,7 @@
             <!-- Taluk -->
             <div class="form-field">
               <label class="form-label" for="taluk">
-                Taluk <span aria-hidden="true" style="color:var(--color-3);">*</span>
+                Taluk <span aria-hidden="true" class="required-star">*</span>
               </label>
               <select class="form-select" id="taluk" name="taluk"
                       required aria-required="true">
@@ -163,7 +194,7 @@
             <!-- Area -->
             <div class="form-field">
               <label class="form-label" for="area-acres">
-                Plot Area (acres) <span aria-hidden="true" style="color:var(--color-3);">*</span>
+                Plot Area (acres) <span aria-hidden="true" class="required-star">*</span>
               </label>
               <input
                 class="form-input" id="area-acres" name="area_acres"
@@ -175,30 +206,36 @@
             </div>
           </div>
 
-          <!-- Submit CTA (one primary per viewport) -->
+          <div class="form-options-row">
+            <label class="checkbox-label" for="use-fallback">
+              <input type="checkbox" id="use-fallback" name="use_fallback" />
+              <span>Use offline Tumakuru Kharif 2026 preset cache (instant mode)</span>
+            </label>
+          </div>
+
+          <!-- Submit CTA -->
           <div class="form-actions">
             <button
               type="submit"
               id="btn-analyze"
               class="btn-primary"
-              aria-describedby="cta-hint"
             >
               <span class="btn-label">🛰 Analyse Plot</span>
             </button>
           </div>
-          <p id="cta-hint" class="form-hint text-center mt-sm">
-            Draws Sentinel-2 data · FAO-56 ET₀ · Kannada advisory · PMFBY PDF
-          </p>
         </form>
       </section>
 
       <!-- ── Results Section ────────────────────────────────────── -->
       <section id="results-section" aria-labelledby="results-title" aria-live="polite">
-        <h2 class="card-title" id="results-title" style="margin-bottom:var(--space-5);">
-          <span aria-hidden="true">📊</span> Analysis Results
-        </h2>
+        <div class="results-header-row">
+          <h2 class="card-title" id="results-title">
+            <span aria-hidden="true">📊</span> Analysis Results
+          </h2>
+          <div class="plot-meta-pill" id="plot-meta-summary"></div>
+        </div>
 
-        <!-- Drought badge + recommendation -->
+        <!-- Shared Drought Banner -->
         <div id="drought-banner" class="rec-card" role="status">
           <div id="drought-badge-el" class="drought-badge" aria-live="polite"></div>
           <p class="rec-title" id="rec-title-en"></p>
@@ -206,112 +243,208 @@
           <p class="rec-kn" id="rec-text-kn" lang="kn"></p>
         </div>
 
-        <!-- Telemetry metrics -->
-        <div class="telemetry-grid" role="list" aria-label="Telemetry metrics">
-          <div class="metric-card" role="listitem" id="card-ndvi">
-            <div class="metric-label">NDVI</div>
-            <div class="metric-value"><span id="val-ndvi">—</span></div>
-            <div class="metric-sub">Vegetation Health</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-ndmi">
-            <div class="metric-label">NDMI</div>
-            <div class="metric-value"><span id="val-ndmi">—</span></div>
-            <div class="metric-sub">Moisture Stress Index</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-ndre">
-            <div class="metric-label">NDRE</div>
-            <div class="metric-value"><span id="val-ndre">—</span></div>
-            <div class="metric-sub">Red-Edge Chlorophyll</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-et0">
-            <div class="metric-label">ET₀</div>
-            <div class="metric-value"><span id="val-et0">—</span><span class="metric-unit">mm/day</span></div>
-            <div class="metric-sub">FAO-56 Reference</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-precip">
-            <div class="metric-label">Precipitation</div>
-            <div class="metric-value"><span id="val-precip">—</span><span class="metric-unit">mm</span></div>
-            <div class="metric-sub">Last 7 days</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-soil">
-            <div class="metric-label">Soil Moisture</div>
-            <div class="metric-value"><span id="val-soil">—</span><span class="metric-unit">%</span></div>
-            <div class="metric-sub">0–7 cm depth</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-vsurv">
-            <div class="metric-label">V<sub>surv</sub></div>
-            <div class="metric-value"><span id="val-vsurv">—</span><span class="metric-unit">L</span></div>
-            <div class="metric-sub">7-day survival water</div>
-          </div>
-          <div class="metric-card" role="listitem" id="card-deficit">
-            <div class="metric-label">Water Deficit</div>
-            <div class="metric-value"><span id="val-deficit">—</span><span class="metric-unit">mm/day</span></div>
-            <div class="metric-sub">ET₀ – precipitation rate</div>
-          </div>
-        </div>
+        <!-- ═══════════════════════════════════════════════════════
+             VIEW A: FARMER WATER COACH
+             ═══════════════════════════════════════════════════════ -->
+        <div id="farmer-view" class="mode-panel" role="tabpanel" aria-labelledby="mode-btn-farmer">
 
-        <!-- NDMI vs NDVI chart -->
-        <div class="chart-container" aria-labelledby="chart-title">
-          <h3 class="card-title" id="chart-title" style="margin-bottom:var(--space-5);">
-            <span aria-hidden="true">📈</span> NDMI vs NDVI — Moisture & Vegetation
-          </h3>
-          <canvas id="indices-chart" role="img" aria-label="Bar chart comparing NDMI and NDVI indices"></canvas>
-        </div>
-
-        <!-- Kannada audio advisory -->
-        <div class="audio-bar" id="audio-bar" aria-label="Kannada voice advisory">
-          <span class="audio-flag" aria-hidden="true">🔊</span>
-          <div class="audio-info">
-            <div class="audio-title">ಕನ್ನಡ ಸಲಹೆ — Kannada Advisory</div>
-            <div class="audio-lang" id="audio-source-label">Sarvam AI · bulbul:v1</div>
-          </div>
-          <div class="audio-controls">
-            <button class="btn-play" id="btn-play-audio"
-                    aria-label="Play Kannada advisory audio" disabled>
-              ▶
-            </button>
-            <audio id="advisory-audio" controls aria-label="Kannada advisory audio">
-              Your browser does not support the audio element.
-            </audio>
-          </div>
-        </div>
-
-        <!-- PDF PMFBY dossier -->
-        <div class="card" id="pdf-section" aria-labelledby="pdf-title">
-          <h3 class="card-title" id="pdf-title">
-            <span aria-hidden="true">📄</span> PMFBY Drought-Loss Dossier
-          </h3>
-          <p style="font-size:var(--text-lg);color:var(--color-4);margin-bottom:var(--space-5);">
-            A tamper-evident PDF with embedded SHA-256 hash and QR verification code
-            for PMFBY crop insurance ground-truthing.
-          </p>
-          <div class="pdf-row">
-            <div>
-              <div style="font-size:var(--text-base);color:var(--color-4);margin-bottom:var(--space-1);">SHA-256 Hash</div>
-              <div class="pdf-hash" id="pdf-hash-display">—</div>
+          <!-- Prominent Sarvam AI Kannada Voice Advisory Player -->
+          <div class="audio-bar audio-bar-featured" id="audio-bar" aria-label="Sarvam AI Kannada voice advisory">
+            <div class="audio-header-row">
+              <div class="audio-title-group">
+                <span class="audio-flag" aria-hidden="true">🔊</span>
+                <div>
+                  <div class="audio-title">ಕನ್ನಡ ಧ್ವನಿ ಸಲಹೆ — Sarvam AI Kannada Voice Advisory</div>
+                  <div class="audio-lang" id="audio-source-label">Sarvam AI · bulbul:v1 · ಕನ್ನಡ</div>
+                </div>
+              </div>
+              <div class="audio-controls">
+                <button type="button" class="btn-play" id="btn-play-audio"
+                        aria-label="Play Kannada advisory audio" disabled>
+                  ▶
+                </button>
+                <audio id="advisory-audio" controls aria-label="Kannada advisory audio">
+                  Your browser does not support the audio element.
+                </audio>
+                <button type="button" class="btn-secondary btn-speak-kn" id="btn-speak-kn"
+                        aria-label="Read Kannada text aloud via browser voice">
+                  🗣 Speak Kannada
+                </button>
+              </div>
             </div>
-            <div style="display:flex;gap:var(--space-5);flex-wrap:wrap;">
-              <a id="pdf-download-link" href="#" download
-                 class="btn-secondary"
-                 style="display:none;text-decoration:none;padding:var(--space-4) var(--space-7);"
-                 aria-label="Download PMFBY PDF dossier">
-                ⬇ Download PDF
-              </a>
-              <button id="btn-copy-hash" class="btn-secondary"
-                      style="display:none;padding:var(--space-4) var(--space-7);"
-                      aria-label="Copy SHA-256 hash to clipboard">
-                📋 Copy Hash
+            <div class="audio-kn-script" id="farmer-kn-script" lang="kn">
+              Kannada stage-specific guidance will appear here after plot analysis.
+            </div>
+          </div>
+
+          <!-- Farmer Water Budget Metrics -->
+          <div class="telemetry-grid farmer-metrics-grid" role="list" aria-label="Farmer water survival metrics">
+            <div class="metric-card metric-card-hero" role="listitem" id="card-vsurv">
+              <div class="metric-label">Exact Survival Water (V<sub>surv</sub>)</div>
+              <div class="metric-value"><span id="val-vsurv">—</span><span class="metric-unit">L</span></div>
+              <div class="metric-sub" id="val-vsurv-daily">7-day minimum crop survival ration</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-soil">
+              <div class="metric-label">Soil Moisture (0–7 cm)</div>
+              <div class="metric-value"><span id="val-soil">—</span><span class="metric-unit">%</span></div>
+              <div class="metric-sub" id="val-soil-status">Root-zone topsoil moisture</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-et0">
+              <div class="metric-label">FAO-56 ET₀</div>
+              <div class="metric-value"><span id="val-et0">—</span><span class="metric-unit">mm/day</span></div>
+              <div class="metric-sub">Daily atmospheric water loss</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-precip">
+              <div class="metric-label">7-Day Rain / Deficit</div>
+              <div class="metric-value"><span id="val-precip">—</span><span class="metric-unit">mm</span></div>
+              <div class="metric-sub">Net deficit: <strong id="val-deficit">—</strong> mm/day</div>
+            </div>
+          </div>
+
+          <!-- Crop Stage Irrigation & Borewell Protection Card -->
+          <div class="card guidance-card" id="crop-guidance-card" aria-labelledby="guidance-title">
+            <h3 class="card-title" id="guidance-title">
+              <span class="icon" aria-hidden="true">💧</span>
+              Crop Stage Irrigation &amp; Borewell Protection Coach
+            </h3>
+            <div class="guidance-grid">
+              <div class="guidance-item">
+                <div class="guidance-item-label">🎯 Critical Reproductive Window</div>
+                <p class="guidance-item-text" id="guidance-window">—</p>
+              </div>
+              <div class="guidance-item">
+                <div class="guidance-item-label">🛡 Borewell Over-Pumping Guard</div>
+                <p class="guidance-item-text" id="guidance-borewell">—</p>
+              </div>
+              <div class="guidance-item guidance-item-wide">
+                <div class="guidance-item-label">🚿 Recommended Watering Schedule</div>
+                <p class="guidance-item-text" id="guidance-schedule">—</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Farmer Soil Moisture & ET0 Trend -->
+          <div class="chart-container" aria-labelledby="farmer-chart-title">
+            <h3 class="card-title" id="farmer-chart-title">
+              <span aria-hidden="true">🌦</span> 2026 Soil Moisture (0–7 cm) vs FAO-56 ET₀ Demand
+            </h3>
+            <canvas id="farmer-trend-chart" role="img" aria-label="Line chart of seasonal soil moisture and reference evapotranspiration"></canvas>
+          </div>
+
+        </div><!-- /#farmer-view -->
+
+        <!-- ═══════════════════════════════════════════════════════
+             VIEW B: REGIONAL OFFICE MONITOR
+             ═══════════════════════════════════════════════════════ -->
+        <div id="officer-view" class="mode-panel" role="tabpanel" aria-labelledby="mode-btn-officer" style="display:none;">
+
+          <!-- Spectral & Drought Classification Metrics -->
+          <div class="telemetry-grid officer-metrics-grid" role="list" aria-label="Spectral indices and drought classification">
+            <div class="metric-card" role="listitem" id="card-officer-stage">
+              <div class="metric-label">Drought Stage</div>
+              <div class="metric-value metric-value-sm" id="val-officer-stage">—</div>
+              <div class="metric-sub" id="val-officer-scene">Scene: —</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-ndvi">
+              <div class="metric-label">NDVI (Canopy)</div>
+              <div class="metric-value"><span id="val-ndvi">—</span></div>
+              <div class="metric-sub" id="val-ndvi-delta">vs Historical Baseline</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-ndmi">
+              <div class="metric-label">NDMI (Moisture)</div>
+              <div class="metric-value"><span id="val-ndmi">—</span></div>
+              <div class="metric-sub">NIR–SWIR Moisture Stress</div>
+            </div>
+            <div class="metric-card" role="listitem" id="card-ndre">
+              <div class="metric-label">NDRE (Chlorophyll)</div>
+              <div class="metric-value"><span id="val-ndre">—</span></div>
+              <div class="metric-sub">Red-Edge Canopy Stress</div>
+            </div>
+          </div>
+
+          <!-- Annotated Time-Series Chart comparing 2026 vs Healthy Historical Baseline -->
+          <div class="chart-container" aria-labelledby="officer-chart-title">
+            <div class="chart-header-row">
+              <h3 class="card-title" id="officer-chart-title" style="margin-bottom:0;">
+                <span aria-hidden="true">📈</span> 2026 Kharif Trajectory vs Healthy Baseline (Post-Harvest Audit)
+              </h3>
+              <span class="forensic-badge" id="forensic-onset-badge">Forensic Timeline</span>
+            </div>
+            <p class="card-subtitle" style="margin-top:var(--space-2);">
+              Tracks mid-season spectral collapse so regional officers can verify PMFBY drought claims even 60+ days after harvest or ploughing.
+            </p>
+            <canvas id="officer-timeseries-chart" role="img" aria-label="Annotated time-series chart comparing 2026 NDVI, NDMI, NDRE against healthy historical baseline"></canvas>
+            <div class="forensic-summary" id="forensic-summary"></div>
+          </div>
+
+          <!-- Prominent PMFBY Audit Dossier Action & Inline Verification -->
+          <div class="card dossier-card" id="pdf-section" aria-labelledby="pdf-title">
+            <div class="dossier-header">
+              <div>
+                <h3 class="card-title" id="pdf-title" style="margin-bottom:var(--space-2);">
+                  <span aria-hidden="true">📄</span> PMFBY Audit Dossier &amp; Cryptographic Anchoring
+                </h3>
+                <p class="card-subtitle" style="margin-bottom:0;">
+                  Generate a tamper-evident ReportLab PDF dossier with embedded SHA-256 hash, QR verification code, and mid-season stress onset proof.
+                </p>
+              </div>
+              <button type="button" id="btn-generate-dossier" class="btn-primary dossier-cta">
+                <span class="btn-label">📄 Generate PMFBY Audit Dossier (PDF)</span>
               </button>
             </div>
+
+            <div class="dossier-status-box" id="dossier-status-box">
+              <div class="dossier-status-top">
+                <span class="verify-pill" id="dossier-verify-status">⏳ Ready to verify</span>
+                <span class="dossier-meta" id="dossier-meta-display">Plot ID: —</span>
+              </div>
+              <div class="pdf-row">
+                <div style="flex:1;min-width:240px;">
+                  <div class="hash-label">ClaimDossier SHA-256 Hash</div>
+                  <div class="pdf-hash" id="pdf-hash-display">—</div>
+                </div>
+                <div class="dossier-actions">
+                  <a id="pdf-download-link" href="#" download
+                     class="btn-secondary"
+                     style="display:none;text-decoration:none;padding:var(--space-3) var(--space-7);"
+                     aria-label="Download PMFBY PDF dossier">
+                    ⬇ Download PDF
+                  </a>
+                  <button type="button" id="btn-copy-hash" class="btn-secondary"
+                          style="display:none;padding:var(--space-3) var(--space-7);"
+                          aria-label="Copy SHA-256 hash to clipboard">
+                    📋 Copy Hash
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /#officer-view -->
+
+      </section>
+      </div><!-- /#workspace-view -->
+
+      <!-- ── Plots History Page ──────────────────────────────────── -->
+      <section id="plots-section" class="card history-page" aria-labelledby="plots-title" style="display:none;">
+        <div class="history-header-row">
+          <div>
+            <h1 class="card-title history-title" id="plots-title" style="margin-bottom:var(--space-1);">
+              <span aria-hidden="true">📋</span> Analysed Plots History
+            </h1>
+            <p class="card-subtitle" style="margin-bottom:0;">
+              Recent farm plot analyses, spectral readings, and drought classifications stored in SookshmaJal.
+            </p>
+          </div>
+          <div class="history-actions">
+            <button type="button" class="btn-secondary header-btn" id="btn-history-refresh">
+              🔄 Refresh
+            </button>
+            <button type="button" class="btn-primary history-back-btn" id="btn-history-back">
+              ← Back to Workspace
+            </button>
           </div>
         </div>
-      </section>
-
-      <!-- ── Plots History ───────────────────────────────────────── -->
-      <section id="plots-section" class="card" aria-labelledby="plots-title" style="display:none;">
-        <h2 class="card-title" id="plots-title">
-          <span aria-hidden="true">📋</span> Analysed Plots
-        </h2>
         <div id="plots-list-container">
           <div class="empty-state">
             <div class="empty-icon" aria-hidden="true">🌾</div>
@@ -323,6 +456,13 @@
     </div><!-- /.container -->
   </main>
 
+  <footer class="site-footer">
+    <div class="container">
+      <strong>SookshmaJal</strong> · Team VECTORZZ (Akshay, Ritesh, Sunil, Rohith) · Hackwarts 2026 AgriTech Track<br />
+      Sentinel-2 L2A · Open-Meteo FAO-56 ET₀ · Sarvam AI Kannada TTS · Tamper-Evident PMFBY Dossiers
+    </div>
+  </footer>
+
   <!-- ── PMFBY Verify Modal ───────────────────────────────────────── -->
   <div
     class="modal-backdrop"
@@ -333,14 +473,14 @@
     tabindex="-1"
   >
     <div class="modal">
-      <button class="modal-close" id="modal-close-btn"
+      <button type="button" class="modal-close" id="modal-close-btn"
               aria-label="Close verification modal">✕</button>
       <h2 class="modal-title" id="modal-verify-title">
         🔍 Verify PMFBY Dossier
       </h2>
-      <p style="font-size:var(--text-lg);color:var(--color-4);margin-bottom:var(--space-7);">
+      <p class="card-subtitle" style="margin-bottom:var(--space-7);">
         Enter the SHA-256 hash from your PDF dossier to verify its authenticity
-        against the SookshmaJal blockchain-anchored registry.
+        against the SookshmaJal ClaimDossier registry.
       </p>
       <div class="hash-input-row">
         <input
@@ -350,10 +490,9 @@
           aria-label="SHA-256 hash to verify"
           maxlength="64"
           pattern="[0-9a-fA-F]{64}"
-          style="font-family:'SF Mono','Fira Mono',monospace;font-size:var(--text-base);"
         />
       </div>
-      <button class="btn-secondary" id="btn-verify-hash"
+      <button type="button" class="btn-secondary" id="btn-verify-hash"
               style="margin-bottom:var(--space-7);">
         Verify Hash
       </button>
@@ -365,13 +504,9 @@
   <div class="toast-container" id="toast-container" role="log" aria-live="polite" aria-label="Notifications"></div>
 
   <!-- ── Scripts ─────────────────────────────────────────────────── -->
-  <!-- Leaflet 1.9.4 — jsDelivr, no SRI so no CORS/hash mismatch blocks -->
   <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Leaflet.Draw 1.0.4 -->
   <script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-  <!-- Chart.js 4.4.7 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <!-- App — plain script (NOT module) so Leaflet globals are available immediately -->
   <script src="app.js"></script>
 </body>
 </html>

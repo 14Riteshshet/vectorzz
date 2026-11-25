@@ -1,20 +1,21 @@
 """
 SookshmaJal – Tests for hydro-meteorological functions.
-Tests FAO-56 ET₀ calculation, survival litres formula, and edge cases.
+Tests FAO-56 ET₀ calculation, survival litres formula, time-series builder, and guidance.
 """
+
 import math
-import pytest
 
 from backend.hydromet import (
     _saturation_vapor_pressure,
-    _actual_vapor_pressure,
+    build_crop_irrigation_guidance,
+    build_timeseries_data,
     fao56_et0,
-    survival_litres,
     get_hydromet_data,
+    survival_litres,
 )
 
-
 # ── SVP tests ─────────────────────────────────────────────────────────────────
+
 
 class TestSaturationVaporPressure:
     def test_at_0_celsius(self):
@@ -39,6 +40,7 @@ class TestSaturationVaporPressure:
 
 # ── ET₀ tests ─────────────────────────────────────────────────────────────────
 
+
 class TestFAO56ET0:
     """Test FAO-56 PM ET₀ with Tumakuru-like climate conditions."""
 
@@ -61,7 +63,7 @@ class TestFAO56ET0:
     def test_et0_increases_with_temperature(self):
         """Higher temperature → higher ET₀."""
         et0_cool = fao56_et0(25.0, 15.0, 70.0, 40.0, 2.0, 18.0)
-        et0_hot  = fao56_et0(38.0, 25.0, 50.0, 25.0, 3.0, 25.0)
+        et0_hot = fao56_et0(38.0, 25.0, 50.0, 25.0, 3.0, 25.0)
         assert et0_hot > et0_cool
 
     def test_et0_non_negative(self):
@@ -71,8 +73,8 @@ class TestFAO56ET0:
 
     def test_et0_high_humidity_lower(self):
         """Higher relative humidity → lower ET₀ (less vapour pressure deficit)."""
-        et0_dry  = fao56_et0(32.0, 20.0, 40.0, 20.0, 3.0, 22.0)
-        et0_humid= fao56_et0(32.0, 20.0, 90.0, 70.0, 3.0, 22.0)
+        et0_dry = fao56_et0(32.0, 20.0, 40.0, 20.0, 3.0, 22.0)
+        et0_humid = fao56_et0(32.0, 20.0, 90.0, 70.0, 3.0, 22.0)
         assert et0_dry > et0_humid
 
     def test_et0_zero_radiation(self):
@@ -86,6 +88,7 @@ class TestFAO56ET0:
 
 
 # ── Survival litres tests ─────────────────────────────────────────────────────
+
 
 class TestSurvivalLitres:
     """Test V_surv = max(0, (Kc×ET₀×days - precip) × area_m² / efficiency) in L."""
@@ -105,13 +108,12 @@ class TestSurvivalLitres:
             precip_mm=0.0,
             efficiency=0.70,
         )
-        # Allow ±10% tolerance
         assert 180_000 < result < 250_000, f"V_surv = {result}"
 
     def test_precipitation_reduces_demand(self):
         """More precipitation → lower survival water needed."""
-        v_no_rain  = survival_litres(5.0, 2.0, "maize", precip_mm=0.0)
-        v_some_rain= survival_litres(5.0, 2.0, "maize", precip_mm=20.0)
+        v_no_rain = survival_litres(5.0, 2.0, "maize", precip_mm=0.0)
+        v_some_rain = survival_litres(5.0, 2.0, "maize", precip_mm=20.0)
         assert v_no_rain > v_some_rain
 
     def test_surplus_rainfall_returns_zero(self):
@@ -121,7 +123,7 @@ class TestSurvivalLitres:
             area_acres=1.0,
             crop_type="default",
             days=7,
-            precip_mm=200.0,  # Way more than ETc
+            precip_mm=200.0,
         )
         assert result == 0.0
 
@@ -137,7 +139,15 @@ class TestSurvivalLitres:
         assert result >= 0.0
 
     def test_known_crops_return_float(self):
-        for crop in ["ragi", "tomato", "groundnut", "cotton", "maize", "rice", "sorghum"]:
+        for crop in [
+            "ragi",
+            "tomato",
+            "groundnut",
+            "cotton",
+            "maize",
+            "rice",
+            "sorghum",
+        ]:
             result = survival_litres(5.0, 2.0, crop)
             assert isinstance(result, float)
             assert result >= 0.0
@@ -145,7 +155,7 @@ class TestSurvivalLitres:
     def test_efficiency_affects_volume(self):
         """Lower irrigation efficiency → more water needed."""
         v_efficient = survival_litres(5.0, 1.0, "ragi", efficiency=0.90)
-        v_inefficient= survival_litres(5.0, 1.0, "ragi", efficiency=0.40)
+        v_inefficient = survival_litres(5.0, 1.0, "ragi", efficiency=0.40)
         assert v_inefficient > v_efficient
 
     def test_zero_et0(self):
@@ -160,31 +170,88 @@ class TestSurvivalLitres:
         assert math.isfinite(result)
 
 
-# ── Integration-style test with mocked HTTP ───────────────────────────────────
+# ── Integration-style test ───────────────────────────────────────────────────
+
 
 class TestGetHydrometData:
     def test_fallback_on_bad_coords(self):
-        """
-        get_hydromet_data should not raise even with invalid coords –
-        it uses climatological fallback.
-        """
-        # Use a valid Tumakuru lat/lon; network may or may not be available in CI
+        """get_hydromet_data should not raise and uses fallback when offline."""
         result = get_hydromet_data(
             lat=13.5,
             lon=77.1,
             area_acres=2.0,
             crop_type="ragi",
+            use_fallback=True,
+            fallback_hydromet={
+                "et0_mm_day": 5.2,
+                "precipitation_mm": 4.0,
+                "soil_moisture_0_7cm_pct": 14.0,
+            },
         )
-        assert "et0_mm_day" in result
-        assert "survival_liters" in result
-        assert result["et0_mm_day"] >= 0
-        assert result["survival_liters"] >= 0
+        assert result["et0_mm_day"] == 5.2
+        assert result["survival_liters"] > 0
+        assert result["source"] == "fallback_cache"
 
     def test_all_expected_keys_present(self):
         result = get_hydromet_data(13.6621, 77.2017, 1.0, "groundnut")
         expected_keys = {
-            "et0_mm_day", "precipitation_mm", "soil_moisture_0_7cm_pct",
-            "survival_liters", "deficit_mm", "open_meteo_timestamp",
+            "et0_mm_day",
+            "precipitation_mm",
+            "soil_moisture_0_7cm_pct",
+            "survival_liters",
+            "deficit_mm",
+            "open_meteo_timestamp",
         }
         for key in expected_keys:
             assert key in result, f"Missing key: {key}"
+
+
+# ── Time-series & Crop Guidance tests ─────────────────────────────────────────
+
+
+class TestTimeSeriesAndGuidance:
+    def test_live_severe_drought_marks_stress_onset(self):
+        ts = build_timeseries_data(
+            ndvi=0.09,
+            ndmi=-0.46,
+            ndre=0.07,
+            et0_mm_day=5.8,
+            soil_moisture_pct=9.4,
+            drought_stage="severe_drought",
+            scene_date="2026-10-30",
+        )
+        n = len(ts["dates"])
+        assert n == 10
+        for key in ["ndvi", "ndmi", "ndre", "baseline_ndvi", "soil_moisture", "et0"]:
+            assert len(ts[key]) == n
+        assert ts["stress_onset_date"] == "2026-08-15"
+        assert ts["stress_onset_index"] == 4
+        assert ts["days_since_stress_onset"] >= 60
+        assert math.isclose(ts["ndvi"][-1], 0.09, abs_tol=0.001)
+
+    def test_healthy_has_no_stress_onset(self):
+        ts = build_timeseries_data(
+            ndvi=0.52,
+            ndmi=0.11,
+            ndre=0.38,
+            et0_mm_day=4.2,
+            soil_moisture_pct=26.0,
+            drought_stage="healthy",
+        )
+        assert ts["stress_onset_date"] is None
+        assert ts["stress_onset_index"] is None
+        assert ts["days_since_stress_onset"] == 0
+
+    def test_crop_irrigation_guidance_structure(self):
+        guidance = build_crop_irrigation_guidance(
+            crop_type="Ragi",
+            drought_stage="moderate_drought",
+            et0_mm_day=5.4,
+            soil_moisture_pct=14.2,
+            survival_liters=210000.0,
+            area_acres=1.5,
+        )
+        assert "Flowering" in guidance["critical_window"]
+        assert math.isclose(guidance["daily_survival_liters"], 30000.0, rel_tol=0.01)
+        assert "borewell" in guidance["borewell_advisory"].lower()
+        assert len(guidance["irrigation_schedule"]) > 10

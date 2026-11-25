@@ -1,20 +1,26 @@
 """
-SookshmaJal – FastAPI integration tests.
-Tests /health, /api/analyze-plot (with mocked satellite & hydromet),
-and /api/verify/{sha256_hash}.
-Uses httpx AsyncClient via pytest-anyio.
+SookshmaJal – FastAPI integration & component tests.
+Tests /health, /api/analyze-plot (mocked & offline cache), time-series payload,
+PMFBY PDF dossier generation + SHA-256/QR verification, and Sarvam voice fallback.
 """
+
 from __future__ import annotations
 
-import json
+import base64
 import math
+from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+import requests
 from httpx import ASGITransport, AsyncClient
 
+from backend.database import init_db
 from backend.main import app
+from backend.pdf_gen import generate_pmfby_pdf
+from backend.voice import generate_voice_advisory
+from backend.voice import settings as voice_settings
 
 # ── A valid Karnataka polygon (Madhugiri area) ────────────────────────────────
 VALID_POLYGON = [
@@ -54,9 +60,15 @@ MOCK_HYDROMET_DATA = {
 }
 
 
+@pytest.fixture(scope="session")
+def anyio_backend():
+    return "asyncio"
+
+
 @pytest.fixture
 async def async_client():
-    """Provide an async HTTPX client wrapping the FastAPI app."""
+    """Initialise DB tables and provide an async HTTPX client wrapping FastAPI."""
+    await init_db()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -65,6 +77,7 @@ async def async_client():
 
 
 # ── /health ───────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.anyio
 async def test_health_ok(async_client: AsyncClient):
@@ -86,58 +99,91 @@ async def test_health_returns_json_content_type(async_client: AsyncClient):
 
 # ── /api/analyze-plot ─────────────────────────────────────────────────────────
 
+
 @pytest.mark.anyio
 async def test_analyze_plot_success(async_client: AsyncClient):
     with (
         patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
         patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
         patch("backend.main.generate_voice_advisory", return_value=(None, "ಬರ ಎಚ್ಚರಿಕೆ")),
-        patch("backend.main.generate_pmfby_pdf", return_value=("/tmp/test.pdf", "a" * 64)),
+        patch(
+            "backend.main.generate_pmfby_pdf", return_value=("/tmp/test.pdf", "a" * 64)
+        ),
     ):
         resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
 
     assert resp.status_code == 200, resp.text
     data = resp.json()
 
-    # Required top-level fields
-    for field in ["plot_id", "farmer_name", "taluk", "crop_type", "area_acres",
-                  "centroid_lat", "centroid_lon", "satellite", "drought",
-                  "hydromet", "analysed_at"]:
+    for field in [
+        "plot_id",
+        "farmer_name",
+        "taluk",
+        "crop_type",
+        "area_acres",
+        "centroid_lat",
+        "centroid_lon",
+        "satellite",
+        "drought",
+        "hydromet",
+        "time_series",
+        "irrigation_guidance",
+        "analysed_at",
+    ]:
         assert field in data, f"Missing field: {field}"
 
-    # Satellite indices
     sat = data["satellite"]
     assert math.isclose(sat["ndvi"], 0.28, abs_tol=0.001)
     assert math.isclose(sat["ndmi"], -0.22, abs_tol=0.001)
     assert sat["data_source"] == "fallback_cache"
 
-    # Drought
     drought = data["drought"]
-    assert drought["stage"] in ["healthy", "early_stress", "moderate_drought", "severe_drought"]
+    assert drought["stage"] in [
+        "healthy",
+        "early_stress",
+        "moderate_drought",
+        "severe_drought",
+    ]
     assert isinstance(drought["recommendation_en"], str)
 
-    # Hydromet
     hm = data["hydromet"]
     assert hm["et0_mm_day"] > 0
     assert hm["survival_liters"] >= 0
+
+    ts = data["time_series"]
+    for ts_key in [
+        "dates",
+        "ndvi",
+        "ndmi",
+        "ndre",
+        "baseline_ndvi",
+        "soil_moisture",
+        "et0",
+    ]:
+        assert ts_key in ts
+        assert len(ts[ts_key]) == len(ts["dates"])
+        assert len(ts[ts_key]) >= 5
 
 
 @pytest.mark.anyio
 async def test_analyze_plot_missing_fields(async_client: AsyncClient):
     resp = await async_client.post("/api/analyze-plot", json={})
-    assert resp.status_code == 422  # Validation error
+    assert resp.status_code == 422
 
 
 @pytest.mark.anyio
 async def test_analyze_plot_outside_karnataka(async_client: AsyncClient):
     """Polygon in Mumbai (outside Karnataka) should be rejected."""
-    payload = {**VALID_PAYLOAD, "polygon_coordinates": [
-        [72.8777, 19.0760],
-        [72.8877, 19.0760],
-        [72.8877, 19.0860],
-        [72.8777, 19.0860],
-        [72.8777, 19.0760],
-    ]}
+    payload = {
+        **VALID_PAYLOAD,
+        "polygon_coordinates": [
+            [72.8777, 19.0760],
+            [72.8877, 19.0760],
+            [72.8877, 19.0860],
+            [72.8777, 19.0860],
+            [72.8777, 19.0760],
+        ],
+    }
     resp = await async_client.post("/api/analyze-plot", json=payload)
     assert resp.status_code == 422
 
@@ -182,12 +228,193 @@ async def test_analyze_plot_centroid_computed(async_client: AsyncClient):
     assert 74.0 <= data["centroid_lon"] <= 78.5
 
 
+# ── Fallback Cache Loading (3 Tumakuru Taluks) ────────────────────────────────
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "taluk,lat,lon,expected_stage,expect_onset",
+    [
+        ("Madhugiri", 13.6621, 77.2017, "severe_drought", True),
+        ("Koratagere", 13.5225, 77.2365, "moderate_drought", True),
+        ("Chikkanayakanahalli", 13.4318, 76.9336, "healthy", False),
+    ],
+)
+async def test_fallback_cache_taluk_trajectories(
+    async_client: AsyncClient,
+    taluk: str,
+    lat: float,
+    lon: float,
+    expected_stage: str,
+    expect_onset: bool,
+):
+    """Offline fallback mode loads distinct Kharif drought trajectories per taluk."""
+    poly = [
+        [lon - 0.005, lat - 0.005],
+        [lon + 0.005, lat - 0.005],
+        [lon + 0.005, lat + 0.005],
+        [lon - 0.005, lat + 0.005],
+        [lon - 0.005, lat - 0.005],
+    ]
+    payload = {
+        "farmer_name": "Siddappa",
+        "crop_type": "Ragi",
+        "taluk": taluk,
+        "area_acres": 2.0,
+        "polygon_coordinates": poly,
+        "use_fallback": True,
+    }
+    resp = await async_client.post("/api/analyze-plot", json=payload)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert data["satellite"]["data_source"] == "fallback_cache"
+    assert data["drought"]["stage"] == expected_stage
+
+    ts = data["time_series"]
+    assert len(ts["dates"]) == 10
+    assert len(ts["baseline_ndvi"]) == 10
+    assert len(ts["soil_moisture"]) == 10
+    assert len(ts["et0"]) == 10
+    if expect_onset:
+        assert ts["stress_onset_date"] is not None
+        assert ts["stress_onset_index"] is not None
+    else:
+        assert ts["stress_onset_date"] is None
+
+    # Playable WAV audio fallback is always returned when SARVAM_API_KEY is unset
+    assert data["audio_base64"] is not None
+    decoded_audio = base64.b64decode(data["audio_base64"])
+    assert decoded_audio[:4] == b"RIFF"
+
+
+# ── PDF Dossier Generation & SHA-256 / QR Verification ────────────────────────
+
+
+def test_generate_pmfby_pdf_creates_valid_pdf_with_sha256(tmp_path: Path):
+    """generate_pmfby_pdf produces a real PDF with embedded 64-char SHA-256 hash."""
+    payload = {
+        "plot_id": "test-plot-123",
+        "farmer_name": "Ramaiah Gowda",
+        "crop_type": "Ragi",
+        "taluk": "Madhugiri",
+        "area_acres": 2.5,
+        "centroid_lat": 13.6621,
+        "centroid_lon": 77.2017,
+        "satellite": MOCK_SAT_DATA,
+        "drought": {
+            "stage": "severe_drought",
+            "stage_label": "Severe Drought — File PMFBY Claim Now",
+            "recommendation_en": "File PMFBY crop loss claim immediately.",
+        },
+        "hydromet": MOCK_HYDROMET_DATA,
+        "time_series": {
+            "dates": ["2026-06-15", "2026-08-15", "2026-10-30"],
+            "stress_onset_date": "2026-08-15",
+            "days_since_stress_onset": 76,
+        },
+    }
+    pdf_path, sha256 = generate_pmfby_pdf(
+        payload=payload,
+        output_dir=str(tmp_path),
+        verify_base_url="http://test",
+    )
+    pdf_file = Path(pdf_path)
+    assert pdf_file.exists()
+    content = pdf_file.read_bytes()
+    assert content.startswith(b"%PDF")
+    assert len(sha256) == 64
+    assert all(c in "0123456789abcdef" for c in sha256)
+
+
+@pytest.mark.anyio
+async def test_dossier_endpoint_and_verify_roundtrip(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Full end-to-end dossier generation, /api/plots/{id}/dossier, /api/verify, and PDF download."""
+    with patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)):
+        resp = await async_client.post("/api/analyze-plot", json=VALID_PAYLOAD)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+
+        plot_id = data["plot_id"]
+        sha = data["pdf_sha256"]
+        assert sha is not None and len(sha) == 64
+
+        # Verify via /api/verify/{sha256}
+        ver_resp = await async_client.get(f"/api/verify/{sha}")
+        assert ver_resp.status_code == 200
+        ver_data = ver_resp.json()
+        assert ver_data["is_valid"] is True
+        assert ver_data["plot_id"] == plot_id
+        assert "time_series" in ver_data["claim_payload"]
+
+        # Regional Office Monitor dossier generation endpoint
+        dossier_resp = await async_client.post(f"/api/plots/{plot_id}/dossier")
+        assert dossier_resp.status_code == 200, dossier_resp.text
+        dossier = dossier_resp.json()
+        assert dossier["sha256_hash"] == sha
+        assert dossier["is_verified"] is True
+        assert dossier["pdf_size_bytes"] > 0
+
+        # Download generated PDF
+        pdf_filename = dossier["pdf_download_url"].rsplit("/", 1)[-1]
+        dl_resp = await async_client.get(f"/api/pdf/{pdf_filename}")
+        assert dl_resp.status_code == 200
+        assert dl_resp.headers["content-type"] == "application/pdf"
+        assert dl_resp.content.startswith(b"%PDF")
+
+
+# ── Voice Advisory Fallback Tests ─────────────────────────────────────────────
+
+
+def test_voice_fallback_without_api_key():
+    """Missing SARVAM_API_KEY returns valid playable WAV audio and Kannada text."""
+    with patch.object(voice_settings, "SARVAM_API_KEY", ""):
+        audio_b64, text_kn = generate_voice_advisory(
+            farmer_name="Ramaiah",
+            crop_type="Ragi",
+            drought_stage="severe_drought",
+            et0=5.8,
+            survival_liters=234946.0,
+            ndvi=0.09,
+            ndmi=-0.46,
+        )
+    assert audio_b64 is not None
+    raw_wav = base64.b64decode(audio_b64)
+    assert raw_wav[:4] == b"RIFF"
+    assert raw_wav[8:12] == b"WAVE"
+    assert "PMFBY" in text_kn
+
+
+def test_voice_fallback_on_sarvam_timeout():
+    """Sarvam API timeout gracefully falls back to playable WAV audio without raising."""
+    with (
+        patch.object(voice_settings, "SARVAM_API_KEY", "dummy-key"),
+        patch("backend.voice.requests.post", side_effect=requests.Timeout("timed out")),
+    ):
+        audio_b64, text_kn = generate_voice_advisory(
+            farmer_name="Basavaraj",
+            crop_type="Groundnut",
+            drought_stage="moderate_drought",
+            et0=5.4,
+            survival_liters=197834.0,
+            ndvi=0.18,
+            ndmi=-0.31,
+        )
+    assert audio_b64 is not None
+    raw_wav = base64.b64decode(audio_b64)
+    assert raw_wav[:4] == b"RIFF"
+    assert len(text_kn) > 10
+
+
 # ── /api/verify/{sha256_hash} ─────────────────────────────────────────────────
+
 
 @pytest.mark.anyio
 async def test_verify_nonexistent_hash(async_client: AsyncClient):
     """A valid but non-existent hash should return is_valid=False."""
-    fake_hash = "a" * 64
+    fake_hash = "e" * 64
     resp = await async_client.get(f"/api/verify/{fake_hash}")
     assert resp.status_code == 200
     data = resp.json()
@@ -211,9 +438,10 @@ async def test_verify_short_hash(async_client: AsyncClient):
 
 # ── /api/plots ────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.anyio
 async def test_list_plots_empty(async_client: AsyncClient):
-    """Fresh database should return empty plots list."""
+    """Database should return plots list with valid total."""
     resp = await async_client.get("/api/plots")
     assert resp.status_code == 200
     data = resp.json()
@@ -235,6 +463,7 @@ async def test_list_plots_response_schema(async_client: AsyncClient):
 
 
 # ── Drought stage classification tests ───────────────────────────────────────
+
 
 @pytest.mark.anyio
 async def test_drought_stage_severe(async_client: AsyncClient):

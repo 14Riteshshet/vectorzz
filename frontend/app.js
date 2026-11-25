@@ -1,53 +1,71 @@
 /**
- * SookshmaJal – Frontend Application
+ * SookshmaJal – Frontend Application (Dual-Mode: Farmer Water Coach & Regional Office Monitor)
  * Team VECTORZZ · Hackwarts 2026 AgriTech Track
  *
- * Fix: wrapped in window.onload so Leaflet, Leaflet.Draw and Chart.js
- * are guaranteed to be parsed before any L.* call runs.
- * Loaded as a plain <script> (not type="module") for global scope access.
+ * Loaded as a plain <script> (not type="module") so Leaflet, Leaflet.Draw, and Chart.js
+ * globals are available immediately on window load.
  */
 
 // ── Config ───────────────────────────────────────────────────────────────────
 var API_BASE = window.location.origin;
 
-// Tumakuru preset coordinates (approximate plot polygons ~1 acre each)
 var TALUK_PRESETS = {
   Madhugiri: {
     center: [13.6621, 77.2017],
+    demoFarmer: 'Ramaiah Gowda',
+    demoCrop: 'Ragi',
+    demoArea: '2.5',
     polygon: function() { return makeSquarePolygon(13.6621, 77.2017, 0.005); }
   },
   Koratagere: {
     center: [13.5225, 77.2365],
+    demoFarmer: 'Basavaraju',
+    demoCrop: 'Groundnut',
+    demoArea: '2.0',
     polygon: function() { return makeSquarePolygon(13.5225, 77.2365, 0.005); }
   },
   Chikkanayakanahalli: {
     center: [13.4318, 76.9336],
+    demoFarmer: 'Shivanna',
+    demoCrop: 'Ragi',
+    demoArea: '3.0',
     polygon: function() { return makeSquarePolygon(13.4318, 76.9336, 0.005); }
   }
 };
 
-/** Build a closed square GeoJSON ring [lon,lat] around a point. */
+var MODE_COPY = {
+  farmer: {
+    title: 'Precision Survival Water Coaching<br />for Tumakuru Farmers',
+    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a Sarvam AI Kannada voice advisory.'
+  },
+  officer: {
+    title: 'Post-Harvest Drought Verification<br />&amp; PMFBY Claim Monitor',
+    subtitle: 'Inspect Sentinel-2 spectral indices (NDVI, NDMI, NDRE), compare 2026 trajectories against healthy baselines to verify mid-season stress 60+ days post-harvest, and issue SHA-256 PMFBY dossiers.'
+  }
+};
+
 function makeSquarePolygon(lat, lon, half) {
   return [
     [lon - half, lat - half],
     [lon + half, lat - half],
     [lon + half, lat + half],
     [lon - half, lat + half],
-    [lon - half, lat - half]  // close ring
+    [lon - half, lat - half]
   ];
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
+var activeMode = 'farmer';
+var isHistoryOpen = false;
 var drawnPolygon = null;
 var currentResult = null;
-var indicesChart = null;
+var farmerChart = null;
+var officerChart = null;
 var map = null;
 var drawnItems = null;
 
-// ── Bootstrap — wait for ALL scripts (Leaflet, Draw, Chart) to load ──────────
+// ── Bootstrap ────────────────────────────────────────────────────────────────
 window.addEventListener('load', function() {
-
-  // Safety check: if Leaflet didn't load, show a friendly error
   if (typeof L === 'undefined') {
     document.getElementById('map').innerHTML =
       '<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px;">' +
@@ -63,33 +81,29 @@ window.addEventListener('load', function() {
 
 // ── Map initialisation ────────────────────────────────────────────────────────
 function initMap() {
-  // Fix Leaflet default icon path broken by bundlers
   delete L.Icon.Default.prototype._getIconUrl;
   L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon-2x.png',
     iconUrl:       'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png',
-    shadowUrl:     'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png',
+    shadowUrl:     'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png'
   });
 
   map = L.map('map', {
-    center: [13.5, 77.1],
-    zoom: 11,
+    center: [13.53, 77.12],
+    zoom: 10,
     zoomControl: true,
     preferCanvas: false
   });
 
-  // OpenStreetMap tiles
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
     crossOrigin: true
   }).addTo(map);
 
-  // Drawn items layer
   drawnItems = new L.FeatureGroup();
   map.addLayer(drawnItems);
 
-  // Draw controls — only if Leaflet.Draw loaded
   if (typeof L.Control !== 'undefined' && typeof L.Control.Draw !== 'undefined') {
     var drawControl = new L.Control.Draw({
       edit: { featureGroup: drawnItems, remove: true },
@@ -99,10 +113,10 @@ function initMap() {
           showArea: true,
           shapeOptions: { color: '#0066CC', weight: 2, fillOpacity: 0.15 }
         },
-        polyline:     false,
-        rectangle:    false,
-        circle:       false,
-        marker:       false,
+        polyline: false,
+        rectangle: false,
+        circle: false,
+        marker: false,
         circlemarker: false
       }
     });
@@ -112,7 +126,9 @@ function initMap() {
       drawnItems.clearLayers();
       drawnItems.addLayer(e.layer);
       var geojson = e.layer.toGeoJSON();
-      drawnPolygon = geojson.geometry.coordinates[0]; // [[lon,lat],…]
+      drawnPolygon = geojson.geometry.coordinates[0];
+      var $fb = document.getElementById('use-fallback');
+      if ($fb) $fb.checked = false;
       updatePolygonStatus(drawnPolygon.length - 1);
     });
 
@@ -121,23 +137,27 @@ function initMap() {
       updatePolygonStatus(0);
     });
   } else {
-    console.warn('Leaflet.Draw not loaded — polygon drawing disabled.');
     document.getElementById('polygon-status').textContent =
-      '⚠ Draw plugin unavailable. Use a taluk preset instead.';
+      '⚠ Draw plugin unavailable. Use a Tumakuru taluk preset instead.';
   }
 
-  // Force map to recalculate size after CSS has rendered
   setTimeout(function() { map.invalidateSize(); }, 300);
 }
 
 // ── UI wiring ─────────────────────────────────────────────────────────────────
 function initUI() {
-
   var $form       = document.getElementById('analyze-form');
   var $btnAnalyze = document.getElementById('btn-analyze');
   var $results    = document.getElementById('results-section');
-  var $polyStatus = document.getElementById('polygon-status');
   var $errSummary = document.getElementById('form-error-summary');
+
+  // ── Mode Switcher ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.mode-segment').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (isHistoryOpen) closeHistoryPage(true);
+      setMode(btn.dataset.mode);
+    });
+  });
 
   // ── Taluk preset buttons ───────────────────────────────────────────────────
   document.querySelectorAll('.btn-preset').forEach(function(btn) {
@@ -158,6 +178,15 @@ function initUI() {
       map.invalidateSize();
 
       document.getElementById('taluk').value = taluk;
+
+      var $farmer = document.getElementById('farmer-name');
+      var $crop = document.getElementById('crop-type');
+      var $area = document.getElementById('area-acres');
+      if (!$farmer.value.trim()) $farmer.value = preset.demoFarmer;
+      if (!$crop.value) $crop.value = preset.demoCrop;
+      if (!$area.value) $area.value = preset.demoArea;
+      document.getElementById('use-fallback').checked = true;
+
       updatePolygonStatus(coords.length - 1);
 
       document.querySelectorAll('.btn-preset').forEach(function(b) {
@@ -167,7 +196,7 @@ function initUI() {
       btn.classList.add('selected');
       btn.setAttribute('aria-pressed', 'true');
 
-      showToast('📍 ' + taluk + ' preset loaded', 'success');
+      showToast('📍 ' + taluk + ' preset loaded (Kharif 2026 demo ready)', 'success');
     });
   });
 
@@ -181,30 +210,35 @@ function initUI() {
       return;
     }
 
-    var farmerName = document.getElementById('farmer-name').value.trim();
-    var cropType   = document.getElementById('crop-type').value;
-    var taluk      = document.getElementById('taluk').value;
-    var areaAcres  = parseFloat(document.getElementById('area-acres').value);
+    var farmerName  = document.getElementById('farmer-name').value.trim();
+    var cropType    = document.getElementById('crop-type').value;
+    var taluk       = document.getElementById('taluk').value;
+    var areaAcres   = parseFloat(document.getElementById('area-acres').value);
+    var useFallback = document.getElementById('use-fallback').checked;
 
     var errors = [];
     if (!farmerName)   errors.push('Farmer Name is required.');
     if (!cropType)     errors.push('Crop Type is required.');
     if (!taluk)        errors.push('Taluk is required.');
-    if (isNaN(areaAcres) || areaAcres < 0.1 || areaAcres > 50)
+    if (isNaN(areaAcres) || areaAcres < 0.1 || areaAcres > 50) {
       errors.push('Plot area must be between 0.1 and 50 acres.');
+    }
 
-    if (errors.length) { showError($errSummary, errors.join(' ')); return; }
+    if (errors.length) {
+      showError($errSummary, errors.join(' '));
+      return;
+    }
 
     setButtonLoading($btnAnalyze, true);
     $results.classList.remove('visible');
 
     var payload = {
-      farmer_name:          farmerName,
-      crop_type:            cropType,
-      taluk:                taluk,
-      area_acres:           areaAcres,
-      polygon_coordinates:  drawnPolygon,
-      use_fallback:         false
+      farmer_name:         farmerName,
+      crop_type:           cropType,
+      taluk:               taluk,
+      area_acres:          areaAcres,
+      polygon_coordinates: drawnPolygon,
+      use_fallback:        useFallback
     };
 
     try {
@@ -231,26 +265,64 @@ function initUI() {
     }
   });
 
-  // ── Plots history ──────────────────────────────────────────────────────────
-  document.getElementById('btn-view-plots').addEventListener('click', async function() {
-    var $section = document.getElementById('plots-section');
-    var $btn = document.getElementById('btn-view-plots');
-    var isExpanded = $btn.getAttribute('aria-expanded') === 'true';
-    if (isExpanded) {
-      $section.style.display = 'none';
-      $btn.setAttribute('aria-expanded', 'false');
+  // ── Regional Officer: Generate & Verify PMFBY Audit Dossier ────────────────
+  document.getElementById('btn-generate-dossier').addEventListener('click', async function() {
+    if (!currentResult || !currentResult.plot_id) {
+      showToast('Please analyse a plot first.', 'warning');
       return;
     }
-    $btn.setAttribute('aria-expanded', 'true');
-    $section.style.display = 'block';
+    var $btn = this;
+    var $statusPill = document.getElementById('dossier-verify-status');
+    setButtonLoading($btn, true);
+    $statusPill.className = 'verify-pill';
+    $statusPill.textContent = '⏳ Generating & verifying dossier…';
+
     try {
-      var data = await fetchJSON('/api/plots');
-      renderPlots(data);
+      var dossier = await fetchJSON('/api/plots/' + encodeURIComponent(currentResult.plot_id) + '/dossier', {
+        method: 'POST'
+      });
+
+      // Confirm against /api/verify/{sha256}
+      var verified = await fetchJSON('/api/verify/' + encodeURIComponent(dossier.sha256_hash));
+
+      currentResult.pdf_sha256 = dossier.sha256_hash;
+      currentResult.pdf_download_url = dossier.pdf_download_url;
+
+      updateDossierUI(dossier.sha256_hash, dossier.pdf_download_url, verified.is_valid, dossier.plot_id, dossier.verified_at || dossier.generated_at);
+      setButtonLoading($btn, false);
+      showToast('📄 PMFBY Audit Dossier generated & SHA-256 verified', 'success');
     } catch (err) {
-      document.getElementById('plots-list-container').innerHTML =
-        '<p style="color:var(--color-3);">Failed to load plots: ' + escHtml(err.message) + '</p>';
+      setButtonLoading($btn, false, true);
+      $statusPill.className = 'verify-pill error';
+      $statusPill.textContent = '❌ Dossier generation failed';
+      showToast('❌ ' + err.message, 'error');
     }
   });
+
+  // ── Plots history page navigation ──────────────────────────────────────────
+  document.getElementById('btn-view-plots').addEventListener('click', function() {
+    if (isHistoryOpen) {
+      closeHistoryPage(true);
+    } else {
+      openHistoryPage(true);
+    }
+  });
+  document.getElementById('btn-history-back').addEventListener('click', function() {
+    closeHistoryPage(true);
+  });
+  document.getElementById('btn-history-refresh').addEventListener('click', function() {
+    loadPlotsHistory();
+  });
+  window.addEventListener('hashchange', function() {
+    if (window.location.hash === '#history') {
+      if (!isHistoryOpen) openHistoryPage(false);
+    } else if (isHistoryOpen) {
+      closeHistoryPage(false);
+    }
+  });
+  if (window.location.hash === '#history') {
+    openHistoryPage(false);
+  }
 
   // ── Verification modal ─────────────────────────────────────────────────────
   var $modal = document.getElementById('modal-verify');
@@ -279,8 +351,9 @@ function initUI() {
       var data = await fetchJSON('/api/verify/' + hash);
       if (data.is_valid) {
         $result.className = 'verify-result valid';
-        $result.innerHTML = '✅ ' + escHtml(data.message) + '<br/>' +
+        $result.innerHTML = escHtml(data.message) + '<br/>' +
           '<strong>Farmer:</strong> ' + escHtml(data.farmer_name || '') + '<br/>' +
+          '<strong>Plot ID:</strong> ' + escHtml(data.plot_id || '') + '<br/>' +
           '<strong>Generated:</strong> ' + (data.generated_at ? new Date(data.generated_at).toLocaleString('en-IN') : 'N/A');
       } else {
         $result.className = 'verify-result invalid';
@@ -298,7 +371,7 @@ function initUI() {
     try {
       await navigator.clipboard.writeText(hash);
       showToast('📋 SHA-256 hash copied', 'success');
-    } catch {
+    } catch (err) {
       showToast('Select and copy the hash manually.', 'warning');
     }
   });
@@ -311,9 +384,39 @@ function initUI() {
     }
   });
 
-  // Speech voices preload
   if ('speechSynthesis' in window) {
     window.speechSynthesis.onvoiceschanged = function() { window.speechSynthesis.getVoices(); };
+  }
+}
+
+// ── Mode Switcher Logic ──────────────────────────────────────────────────────
+function setMode(mode) {
+  if (mode !== 'farmer' && mode !== 'officer') return;
+  activeMode = mode;
+  document.body.dataset.mode = mode;
+
+  var $farmerBtn = document.getElementById('mode-btn-farmer');
+  var $officerBtn = document.getElementById('mode-btn-officer');
+  $farmerBtn.classList.toggle('active', mode === 'farmer');
+  $officerBtn.classList.toggle('active', mode === 'officer');
+  $farmerBtn.setAttribute('aria-selected', String(mode === 'farmer'));
+  $officerBtn.setAttribute('aria-selected', String(mode === 'officer'));
+
+  var copy = MODE_COPY[mode];
+  document.getElementById('hero-title').innerHTML = copy.title;
+  document.getElementById('hero-subtitle').innerHTML = copy.subtitle;
+
+  document.getElementById('farmer-view').style.display = mode === 'farmer' ? 'block' : 'none';
+  document.getElementById('officer-view').style.display = mode === 'officer' ? 'block' : 'none';
+
+  // Re-render charts cleanly when switching tabs after analysis
+  if (currentResult) {
+    var ts = currentResult.time_series || {};
+    if (mode === 'farmer') {
+      renderFarmerChart(ts);
+    } else {
+      renderOfficerChart(ts, currentResult.drought);
+    }
   }
 }
 
@@ -322,12 +425,17 @@ function renderResults(data) {
   var sat = data.satellite;
   var drought = data.drought;
   var hm = data.hydromet;
-
-  // Drought banner
+  var ts = data.time_series || {};
+  var guidance = data.irrigation_guidance || {};
   var cls = stageClass(drought.stage);
-  var droughtBanner = document.getElementById('drought-banner');
-  droughtBanner.className = 'rec-card ' + cls;
 
+  // Meta summary pill
+  document.getElementById('plot-meta-summary').textContent =
+    data.farmer_name + ' · ' + data.crop_type + ' · ' + data.taluk +
+    ' (' + data.area_acres.toFixed(1) + ' ac · ' + sat.scene_date + ')';
+
+  // Shared drought banner
+  document.getElementById('drought-banner').className = 'rec-card ' + cls;
   var badgeEl = document.getElementById('drought-badge-el');
   badgeEl.className = 'drought-badge ' + cls;
   badgeEl.textContent = drought.stage_label;
@@ -336,29 +444,139 @@ function renderResults(data) {
   document.getElementById('rec-text-en').textContent = drought.recommendation_en;
   document.getElementById('rec-text-kn').textContent = drought.recommendation_kn || '';
 
-  // Metric cards
+  // Accent styling on metric cards
   document.querySelectorAll('.metric-card').forEach(function(c) {
-    c.className = 'metric-card ' + cls;
+    var isHero = c.classList.contains('metric-card-hero');
+    c.className = 'metric-card ' + (isHero ? 'metric-card-hero ' : '') + cls;
   });
 
-  document.getElementById('val-ndvi').textContent   = sat.ndvi.toFixed(4);
-  document.getElementById('val-ndmi').textContent   = sat.ndmi.toFixed(4);
-  document.getElementById('val-ndre').textContent   = sat.ndre.toFixed(4);
-  document.getElementById('val-et0').textContent    = hm.et0_mm_day.toFixed(2);
-  document.getElementById('val-precip').textContent = hm.precipitation_mm.toFixed(1);
-  document.getElementById('val-soil').textContent   = hm.soil_moisture_0_7cm_pct.toFixed(1);
-  document.getElementById('val-vsurv').textContent  = Number(hm.survival_liters).toLocaleString('en-IN');
-  document.getElementById('val-deficit').textContent= hm.deficit_mm.toFixed(2);
+  // ── Farmer Water Coach fields ──────────────────────────────────────────────
+  var vsurv = Number(hm.survival_liters || 0);
+  var dailyVsurv = guidance.daily_survival_liters != null
+    ? Number(guidance.daily_survival_liters)
+    : vsurv / 7.0;
 
-  renderChart(sat.ndvi, sat.ndmi, sat.ndre);
-  setupAudio(data.audio_base64, drought);
+  document.getElementById('val-vsurv').textContent = vsurv.toLocaleString('en-IN');
+  document.getElementById('val-vsurv-daily').textContent =
+    '~' + Math.round(dailyVsurv).toLocaleString('en-IN') + ' L/day survival ration';
+  document.getElementById('val-soil').textContent = hm.soil_moisture_0_7cm_pct.toFixed(1);
+  document.getElementById('val-soil-status').textContent =
+    hm.soil_moisture_0_7cm_pct < 15
+      ? 'Critical root-zone dryness (0–7 cm)'
+      : (hm.soil_moisture_0_7cm_pct < 22 ? 'Low topsoil moisture (0–7 cm)' : 'Adequate topsoil moisture (0–7 cm)');
+  document.getElementById('val-et0').textContent = hm.et0_mm_day.toFixed(2);
+  document.getElementById('val-precip').textContent = hm.precipitation_mm.toFixed(1);
+  document.getElementById('val-deficit').textContent = hm.deficit_mm.toFixed(2);
+
+  document.getElementById('guidance-window').textContent =
+    guidance.critical_window || 'Flowering & Grain-Filling Reproductive Window';
+  document.getElementById('guidance-borewell').textContent =
+    guidance.borewell_advisory || 'Avoid excess borewell pumping; ration to V_surv root-zone volume.';
+  document.getElementById('guidance-schedule').textContent =
+    guidance.irrigation_schedule || drought.recommendation_en;
+
+  document.getElementById('farmer-kn-script').textContent =
+    drought.recommendation_kn || drought.recommendation_en;
+
+  setupAudio(data.audio_base64, drought, data.audio_source);
+
+  // ── Regional Office Monitor fields ─────────────────────────────────────────
+  document.getElementById('val-officer-stage').textContent = drought.stage_label;
+  document.getElementById('val-officer-scene').textContent =
+    'Scene: ' + sat.scene_date + ' · ' + sat.data_source;
+  document.getElementById('val-ndvi').textContent = sat.ndvi.toFixed(4);
+  document.getElementById('val-ndmi').textContent = sat.ndmi.toFixed(4);
+  document.getElementById('val-ndre').textContent = sat.ndre.toFixed(4);
+
+  var baselineArr = ts.baseline_ndvi || [];
+  var latestBase = baselineArr.length ? baselineArr[baselineArr.length - 1] : null;
+  if (latestBase !== null) {
+    var diff = sat.ndvi - latestBase;
+    var sign = diff >= 0 ? '+' : '';
+    document.getElementById('val-ndvi-delta').textContent =
+      sign + diff.toFixed(3) + ' vs baseline (' + latestBase.toFixed(2) + ')';
+  }
+
+  renderForensicSummary(ts, sat);
 
   if (data.pdf_sha256) {
-    document.getElementById('pdf-hash-display').textContent = data.pdf_sha256;
-    var dlLink = document.getElementById('pdf-download-link');
-    dlLink.href = data.pdf_download_url || '#';
-    dlLink.style.display = 'inline-flex';
-    document.getElementById('btn-copy-hash').style.display = 'inline-flex';
+    updateDossierUI(data.pdf_sha256, data.pdf_download_url, true, data.plot_id, data.analysed_at);
+  } else {
+    updateDossierUI(null, null, false, data.plot_id, null);
+  }
+
+  // Render charts for active mode
+  if (activeMode === 'farmer') {
+    renderFarmerChart(ts);
+  } else {
+    renderOfficerChart(ts, drought);
+  }
+}
+
+function updateDossierUI(sha256, downloadUrl, isVerified, plotId, timestampIso) {
+  var $pill = document.getElementById('dossier-verify-status');
+  var $hash = document.getElementById('pdf-hash-display');
+  var $meta = document.getElementById('dossier-meta-display');
+  var $dl   = document.getElementById('pdf-download-link');
+  var $copy = document.getElementById('btn-copy-hash');
+
+  $meta.textContent = 'Plot ID: ' + (plotId || '—') +
+    (timestampIso ? ' · Verified: ' + new Date(timestampIso).toLocaleString('en-IN') : '');
+
+  if (sha256) {
+    $hash.textContent = sha256;
+    $dl.href = downloadUrl || '#';
+    $dl.style.display = downloadUrl ? 'inline-flex' : 'none';
+    $copy.style.display = 'inline-flex';
+    $pill.className = isVerified ? 'verify-pill verified' : 'verify-pill';
+    $pill.textContent = isVerified
+      ? '✅ ClaimDossier Verified (SHA-256 Registry)'
+      : '⏳ Generated (Click Generate to Verify)';
+  } else {
+    $hash.textContent = '—';
+    $dl.style.display = 'none';
+    $copy.style.display = 'none';
+    $pill.className = 'verify-pill';
+    $pill.textContent = '⏳ Click "Generate PMFBY Audit Dossier (PDF)"';
+  }
+}
+
+function renderForensicSummary(ts, sat) {
+  var $badge = document.getElementById('forensic-onset-badge');
+  var $sum   = document.getElementById('forensic-summary');
+  var dates  = ts.dates || [];
+  var ndvi   = ts.ndvi || [];
+  var base   = ts.baseline_ndvi || [];
+
+  var maxDropPct = 0;
+  var peakBase = 0;
+  for (var i = 0; i < Math.min(ndvi.length, base.length); i++) {
+    if (base[i] > 0.1) {
+      var drop = ((base[i] - ndvi[i]) / base[i]) * 100;
+      if (drop > maxDropPct) {
+        maxDropPct = drop;
+        peakBase = base[i];
+      }
+    }
+  }
+
+  if (ts.stress_onset_date) {
+    var days = ts.days_since_stress_onset != null ? ts.days_since_stress_onset : 60;
+    $badge.className = 'forensic-badge stress';
+    $badge.textContent = '⚠ Stress Onset: ' + ts.stress_onset_date + ' (' + days + 'd trail)';
+    $sum.innerHTML =
+      '<span><strong>Mid-Season Stress Onset:</strong> ' + escHtml(ts.stress_onset_date) + '</span>' +
+      '<span><strong>Audit Horizon:</strong> ' + days + ' days tracked (60+ day post-harvest proof)</span>' +
+      '<span><strong>Peak Baseline Divergence:</strong> −' + maxDropPct.toFixed(0) + '% vs healthy (' + peakBase.toFixed(2) + ')</span>' +
+      '<span><strong>Cloud Cover:</strong> ' + Number(sat.cloud_cover_pct || 0).toFixed(1) + '%</span>';
+  } else {
+    $badge.className = 'forensic-badge';
+    $badge.textContent = '✅ Within Healthy Baseline';
+    $sum.innerHTML =
+      '<span><strong>Mid-Season Stress Onset:</strong> None detected</span>' +
+      '<span><strong>Trajectory Points:</strong> ' + dates.length + ' Kharif observations</span>' +
+      '<span><strong>Max Deviation:</strong> ' + maxDropPct.toFixed(0) + '% vs 5-yr baseline</span>' +
+      '<span><strong>Cloud Cover:</strong> ' + Number(sat.cloud_cover_pct || 0).toFixed(1) + '%</span>';
   }
 }
 
@@ -370,67 +588,274 @@ function stageClass(stage) {
   return 'healthy';
 }
 
-// ── Chart.js ──────────────────────────────────────────────────────────────────
-function renderChart(ndvi, ndmi, ndre) {
+// ── Chart.js: Farmer Soil Moisture & ET0 Trend ───────────────────────────────
+function renderFarmerChart(ts) {
   if (typeof Chart === 'undefined') return;
-  var ctx = document.getElementById('indices-chart').getContext('2d');
-  if (indicesChart) indicesChart.destroy();
+  var canvas = document.getElementById('farmer-trend-chart');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (farmerChart) farmerChart.destroy();
 
-  indicesChart = new Chart(ctx, {
-    type: 'bar',
+  var dates = ts.dates || [];
+  var sm    = ts.soil_moisture || [];
+  var et0   = ts.et0 || [];
+
+  farmerChart = new Chart(ctx, {
+    type: 'line',
     data: {
-      labels: ['NDVI (Vegetation)', 'NDMI (Moisture)', 'NDRE (Red-Edge)'],
-      datasets: [{
-        label: 'Index Value',
-        data: [ndvi, ndmi, ndre],
-        backgroundColor: [
-          ndvi > 0.3 ? 'rgba(0,102,204,0.75)'  : 'rgba(255,121,27,0.75)',
-          ndmi > 0   ? 'rgba(0,102,204,0.75)'  : 'rgba(182,68,0,0.75)',
-          ndre > 0.2 ? 'rgba(0,102,204,0.75)'  : 'rgba(255,121,27,0.75)'
-        ],
-        borderColor: ['#0066CC', '#0066CC', '#0066CC'],
-        borderWidth: 2,
-        borderRadius: 8
-      }]
+      labels: dates,
+      datasets: [
+        {
+          label: 'Soil Moisture 0–7 cm (%)',
+          data: sm,
+          borderColor: '#0066CC',
+          backgroundColor: 'rgba(0, 102, 204, 0.12)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.35,
+          pointRadius: 4,
+          yAxisID: 'y'
+        },
+        {
+          label: 'FAO-56 ET₀ (mm/day)',
+          data: et0,
+          borderColor: '#FF791B',
+          backgroundColor: 'rgba(255, 121, 27, 0.1)',
+          borderWidth: 2.5,
+          borderDash: [5, 4],
+          tension: 0.35,
+          pointRadius: 3,
+          yAxisID: 'y1'
+        }
+      ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: function(ctx) { return 'Value: ' + ctx.parsed.y.toFixed(4); }
-          }
+        legend: {
+          position: 'top',
+          labels: { color: '#1D1D1F', font: { size: 12, weight: '600' } }
         }
       },
       scales: {
         y: {
-          min: -1, max: 1,
+          type: 'linear',
+          position: 'left',
+          min: 0,
+          max: 45,
           grid: { color: '#E8E8ED' },
-          ticks: { color: '#6E6E73', font: { size: 12 } },
-          title: { display: true, text: 'Index Value (−1 to +1)', color: '#6E6E73', font: { size: 12 } }
+          ticks: { color: '#0066CC', font: { size: 12 } },
+          title: { display: true, text: 'Soil Moisture (%)', color: '#0066CC' }
+        },
+        y1: {
+          type: 'linear',
+          position: 'right',
+          min: 0,
+          max: 8,
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#FF791B', font: { size: 12 } },
+          title: { display: true, text: 'ET₀ (mm/day)', color: '#FF791B' }
         },
         x: {
           grid: { display: false },
-          ticks: { color: '#1D1D1F', font: { size: 12, weight: '600' } }
+          ticks: { color: '#6E6E73', font: { size: 11 } }
         }
       }
     }
   });
 }
 
-// ── Audio ─────────────────────────────────────────────────────────────────────
-function setupAudio(audioBase64, drought) {
+// ── Chart.js: Regional Office Annotated Forensic Time-Series ─────────────────
+function renderOfficerChart(ts, drought) {
+  if (typeof Chart === 'undefined') return;
+  var canvas = document.getElementById('officer-timeseries-chart');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  if (officerChart) officerChart.destroy();
+
+  var dates    = ts.dates || [];
+  var ndvi     = ts.ndvi || [];
+  var baseNdvi = ts.baseline_ndvi || [];
+  var ndmi     = ts.ndmi || [];
+  var ndre     = ts.ndre || [];
+  var onsetIdx = ts.stress_onset_index;
+  var onsetDate = ts.stress_onset_date;
+  var daysSince = ts.days_since_stress_onset;
+
+  var isSevere = drought && drought.stage === 'severe_drought';
+  var accentColor = isSevere ? '#B64400' : '#FF791B';
+
+  // Inline annotation plugin to mark mid-season stress onset for post-harvest audit
+  var stressAnnotationPlugin = {
+    id: 'stressOnsetMarker',
+    afterDatasetsDraw: function(chart) {
+      if (onsetIdx === null || onsetIdx === undefined || onsetIdx < 0 || onsetIdx >= dates.length) {
+        return;
+      }
+      var xScale = chart.scales.x;
+      var yScale = chart.scales.y;
+      var xPos = xScale.getPixelForValue(onsetIdx);
+      var rightX = xScale.getPixelForValue(dates.length - 1);
+      var c = chart.ctx;
+
+      c.save();
+
+      // Shaded post-onset audit zone
+      c.fillStyle = isSevere ? 'rgba(182, 68, 0, 0.08)' : 'rgba(255, 121, 27, 0.08)';
+      c.fillRect(xPos, yScale.top, Math.max(0, rightX - xPos), yScale.bottom - yScale.top);
+
+      // Vertical dashed onset line
+      c.beginPath();
+      c.setLineDash([6, 4]);
+      c.strokeStyle = accentColor;
+      c.lineWidth = 2;
+      c.moveTo(xPos, yScale.top);
+      c.lineTo(xPos, yScale.bottom);
+      c.stroke();
+
+      // Annotation pill label
+      var label = 'Stress Onset: ' + (onsetDate || dates[onsetIdx]) +
+        (daysSince ? ' (' + daysSince + 'd)' : '');
+      c.font = '600 11px -apple-system, BlinkMacSystemFont, sans-serif';
+      var textW = c.measureText(label).width;
+      var padX = 8;
+      var boxW = textW + padX * 2;
+      var boxH = 22;
+      var boxX = Math.min(Math.max(xPos - boxW / 2, yScale.left + 4), xScale.right - boxW - 4);
+      var boxY = yScale.top + 6;
+
+      c.fillStyle = accentColor;
+      c.beginPath();
+      if (c.roundRect) {
+        c.roundRect(boxX, boxY, boxW, boxH, 11);
+      } else {
+        c.rect(boxX, boxY, boxW, boxH);
+      }
+      c.fill();
+
+      c.fillStyle = '#FFFFFF';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(label, boxX + boxW / 2, boxY + boxH / 2);
+
+      c.restore();
+    }
+  };
+
+  officerChart = new Chart(ctx, {
+    type: 'line',
+    plugins: [stressAnnotationPlugin],
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Healthy Historical Baseline (NDVI)',
+          data: baseNdvi,
+          borderColor: '#0066CC',
+          backgroundColor: 'rgba(0, 102, 204, 0.06)',
+          borderWidth: 2,
+          borderDash: [6, 5],
+          tension: 0.35,
+          pointRadius: 3
+        },
+        {
+          label: '2026 Plot NDVI',
+          data: ndvi,
+          borderColor: accentColor,
+          backgroundColor: isSevere ? 'rgba(182, 68, 0, 0.12)' : 'rgba(255, 121, 27, 0.12)',
+          borderWidth: 3,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 4
+        },
+        {
+          label: '2026 NDMI (Moisture)',
+          data: ndmi,
+          borderColor: '#1D1D1F',
+          borderWidth: 2,
+          tension: 0.3,
+          pointRadius: 3
+        },
+        {
+          label: '2026 NDRE (Chlorophyll)',
+          data: ndre,
+          borderColor: '#6E6E73',
+          borderWidth: 2,
+          borderDash: [2, 3],
+          tension: 0.3,
+          pointRadius: 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { color: '#1D1D1F', font: { size: 12, weight: '600' } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(item) {
+              return item.dataset.label + ': ' + Number(item.parsed.y).toFixed(3);
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: -0.6,
+          max: 1.0,
+          grid: { color: '#E8E8ED' },
+          ticks: { color: '#6E6E73', font: { size: 12 } },
+          title: { display: true, text: 'Spectral Index (−0.6 to +1.0)', color: '#6E6E73' }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: '#1D1D1F', font: { size: 11, weight: '600' } }
+        }
+      }
+    }
+  });
+}
+
+// ── Audio & Speech Synthesis ─────────────────────────────────────────────────
+function setupAudio(audioBase64, drought, audioSource) {
   var $audio    = document.getElementById('advisory-audio');
   var $playBtn  = document.getElementById('btn-play-audio');
   var $srcLabel = document.getElementById('audio-source-label');
+  var $speakBtn = document.getElementById('btn-speak-kn');
+
+  var knText = drought.recommendation_kn || drought.recommendation_en || '';
+
+  $speakBtn.onclick = function() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      var utter = new SpeechSynthesisUtterance(knText);
+      var voices = window.speechSynthesis.getVoices();
+      var knVoice = voices.find(function(v) { return v.lang && v.lang.startsWith('kn'); });
+      if (knVoice) utter.voice = knVoice;
+      utter.lang = 'kn-IN';
+      utter.rate = 0.92;
+      window.speechSynthesis.speak(utter);
+      showToast('🗣 Reading Kannada advisory aloud', 'success');
+    } else {
+      showToast('Browser speech synthesis unavailable.', 'warning');
+    }
+  };
 
   if (audioBase64) {
     $audio.src = 'data:audio/wav;base64,' + audioBase64;
     $audio.load();
     $playBtn.disabled = false;
-    $srcLabel.textContent = 'Sarvam AI · bulbul:v1 · ಕನ್ನಡ';
+    $playBtn.textContent = '▶';
+    $srcLabel.textContent = audioSource === 'sarvam_bulbul_v1'
+      ? 'Sarvam AI · bulbul:v1 · ಕನ್ನಡ'
+      : 'Offline Playable WAV Fallback · ಕನ್ನಡ ಸಲಹೆ';
 
     $playBtn.onclick = function() {
       if ($audio.paused) {
@@ -442,28 +867,58 @@ function setupAudio(audioBase64, drought) {
       }
     };
     $audio.onended = function() { $playBtn.textContent = '▶'; };
-
   } else {
     $playBtn.disabled = false;
     $srcLabel.textContent = 'Browser Speech Synthesis (offline fallback)';
-    var text = drought.recommendation_kn || drought.recommendation_en || '';
-
-    $playBtn.onclick = function() {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        var utter = new SpeechSynthesisUtterance(text);
-        var voices = window.speechSynthesis.getVoices();
-        var knVoice = voices.find(function(v) { return v.lang.startsWith('kn'); });
-        if (knVoice) utter.voice = knVoice;
-        utter.lang = 'kn-IN';
-        utter.rate = 0.9;
-        window.speechSynthesis.speak(utter);
-        showToast('🔊 Playing via browser speech synthesis', 'success');
-      } else {
-        showToast('Speech synthesis not supported in this browser.', 'warning');
-      }
-    };
+    $playBtn.onclick = $speakBtn.onclick;
   }
+}
+
+// ── Plots History Page ────────────────────────────────────────────────────────
+async function loadPlotsHistory() {
+  var $container = document.getElementById('plots-list-container');
+  $container.innerHTML = '<div class="empty-state"><p>Loading analysed plots…</p></div>';
+  try {
+    var data = await fetchJSON('/api/plots');
+    renderPlots(data);
+  } catch (err) {
+    $container.innerHTML =
+      '<p style="color:var(--color-3);">Failed to load plots: ' + escHtml(err.message) + '</p>';
+  }
+}
+
+function openHistoryPage(updateHash) {
+  isHistoryOpen = true;
+  document.getElementById('workspace-view').style.display = 'none';
+  document.getElementById('plots-section').style.display = 'block';
+
+  var $btn = document.getElementById('btn-view-plots');
+  $btn.setAttribute('aria-expanded', 'true');
+  $btn.classList.add('active');
+
+  if (updateHash && window.location.hash !== '#history') {
+    window.history.pushState(null, '', '#history');
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  loadPlotsHistory();
+}
+
+function closeHistoryPage(updateHash) {
+  isHistoryOpen = false;
+  document.getElementById('plots-section').style.display = 'none';
+  document.getElementById('workspace-view').style.display = 'block';
+
+  var $btn = document.getElementById('btn-view-plots');
+  $btn.setAttribute('aria-expanded', 'false');
+  $btn.classList.remove('active');
+
+  if (updateHash && window.location.hash === '#history') {
+    window.history.pushState(null, '', window.location.pathname + window.location.search);
+  }
+  if (map) {
+    setTimeout(function() { map.invalidateSize(); }, 80);
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
@@ -475,12 +930,16 @@ function renderPlots(data) {
   }
   var rows = data.plots.map(function(p) {
     var cls = stageClass(p.drought_stage || '');
+    var ndviTxt = p.ndvi != null ? 'NDVI ' + Number(p.ndvi).toFixed(2) : '';
+    var ndmiTxt = p.ndmi != null ? 'NDMI ' + Number(p.ndmi).toFixed(2) : '';
+    var indices = [ndviTxt, ndmiTxt].filter(Boolean).join(' · ');
     return '<div class="plot-row" role="listitem">' +
       '<div><div class="plot-row-name">' + escHtml(p.farmer_name) + '</div>' +
-      '<div class="plot-row-meta">' + escHtml(p.crop_type) + ' · ' + escHtml(p.taluk) + ' · ' + p.area_acres.toFixed(1) + ' ac</div></div>' +
+      '<div class="plot-row-meta">' + escHtml(p.crop_type) + ' · ' + escHtml(p.taluk) + ' · ' + p.area_acres.toFixed(1) + ' ac' +
+      (indices ? ' · ' + indices : '') + '</div></div>' +
       '<span class="drought-badge ' + cls + '" style="font-size:var(--text-base);padding:var(--space-1) var(--space-4);">' +
         escHtml((p.drought_stage || 'unknown').replace('_', ' ')) + '</span>' +
-      '<div class="plot-row-meta">' + new Date(p.created_at).toLocaleDateString('en-IN') + '</div>' +
+      '<div class="plot-row-meta">' + new Date(p.created_at).toLocaleString('en-IN') + '</div>' +
       '</div>';
   }).join('');
   container.innerHTML = '<div class="plots-list" role="list">' + rows + '</div>' +
@@ -507,7 +966,7 @@ function updatePolygonStatus(vertexCount) {
     $el.textContent = '✅ Polygon drawn with ' + vertexCount + ' vertices. Ready for analysis.';
     $el.style.color = 'var(--color-2)';
   } else {
-    $el.textContent = 'No polygon drawn yet. Use the draw tool on the map.';
+    $el.textContent = 'No polygon drawn yet. Use the draw tool on the map or tap a preset.';
     $el.style.color = 'var(--color-4)';
   }
 }
@@ -517,7 +976,7 @@ async function fetchJSON(url, options) {
   var res = await fetch(API_BASE + url, options || {});
   if (!res.ok) {
     var detail = 'HTTP ' + res.status;
-    try { var body = await res.json(); detail = body.detail || JSON.stringify(body); } catch(e) {}
+    try { var body = await res.json(); detail = body.detail || JSON.stringify(body); } catch (e) {}
     throw new Error(detail);
   }
   return res.json();

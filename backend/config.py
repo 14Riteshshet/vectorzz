@@ -2,12 +2,11 @@
 SookshmaJal – Configuration
 Loads all secrets and settings from .env via Pydantic BaseSettings.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
 
-from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -36,7 +35,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_VERIFY: str = "30/minute"
 
     @property
-    def cors_origins(self) -> List[str]:
+    def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

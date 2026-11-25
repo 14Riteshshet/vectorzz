@@ -92,7 +92,6 @@ jobs:
         run: |
           python -m pytest tests/ -v \
             --tb=short \
-            --asyncio-mode=auto \
             -p no:warnings
 
       - name: Cleanup test DB

@@ -5,14 +5,13 @@ performs windowed COG reads for bands B04, B05, B08, B11, SCL,
 computes NDVI, NDMI, NDRE indices, and falls back to cached JSON
 when the API is unreachable.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import math
-import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -20,12 +19,13 @@ logger = logging.getLogger(__name__)
 
 # ── Lazy imports for heavy geospatial libs ─────────────────────────────────────
 try:
-    import pystac_client
     import planetary_computer
+    import pystac_client
     import rasterio
     from rasterio.enums import Resampling
-    from rasterio.windows import from_bounds
     from rasterio.warp import transform_bounds
+    from rasterio.windows import from_bounds
+
     _GEOSPATIAL_AVAILABLE = True
 except ImportError:
     _GEOSPATIAL_AVAILABLE = False
@@ -38,7 +38,9 @@ COLLECTION = "sentinel-2-l2a"
 MAX_CLOUD_COVER = 30  # percent
 
 
-def _centroid_bbox(polygon_coords: list[list[float]], buffer_deg: float = 0.01) -> tuple[float, float, float, float]:
+def _centroid_bbox(
+    polygon_coords: list[list[float]], buffer_deg: float = 0.01
+) -> tuple[float, float, float, float]:
     """Return (minx, miny, maxx, maxy) bbox around polygon centroid."""
     lons = [c[0] for c in polygon_coords]
     lats = [c[1] for c in polygon_coords]
@@ -62,7 +64,9 @@ def _safe_ratio(a: np.ndarray, b: np.ndarray) -> float:
     """Compute mean((a-b)/(a+b)) masking zeros."""
     denom = a.astype(float) + b.astype(float)
     with np.errstate(invalid="ignore", divide="ignore"):
-        ratio = np.where(denom != 0, (a.astype(float) - b.astype(float)) / denom, np.nan)
+        ratio = np.where(
+            denom != 0, (a.astype(float) - b.astype(float)) / denom, np.nan
+        )
     valid = ratio[~np.isnan(ratio)]
     if valid.size == 0:
         return float("nan")
@@ -83,7 +87,7 @@ def compute_indices_from_bands(
     b05: np.ndarray,
     b08: np.ndarray,
     b11: np.ndarray,
-    scl: Optional[np.ndarray] = None,
+    scl: np.ndarray | None = None,
 ) -> dict[str, float]:
     """Compute NDVI, NDMI, NDRE from raw DN arrays. Returns dict of indices."""
     if scl is not None:
@@ -98,9 +102,9 @@ def compute_indices_from_bands(
         b08 = b08.flatten()
         b11 = b11.flatten()
 
-    ndvi = _safe_ratio(b08, b04)   # (NIR - Red) / (NIR + Red)
-    ndmi = _safe_ratio(b08, b11)   # (NIR - SWIR) / (NIR + SWIR)
-    ndre = _safe_ratio(b08, b05)   # (NIR - RedEdge) / (NIR + RedEdge)
+    ndvi = _safe_ratio(b08, b04)  # (NIR - Red) / (NIR + Red)
+    ndmi = _safe_ratio(b08, b11)  # (NIR - SWIR) / (NIR + SWIR)
+    ndre = _safe_ratio(b08, b05)  # (NIR - RedEdge) / (NIR + RedEdge)
 
     return {
         "ndvi": round(float(ndvi) if not math.isnan(ndvi) else 0.0, 4),
@@ -112,7 +116,7 @@ def compute_indices_from_bands(
 def _read_band_window(
     href: str,
     bbox: tuple,
-    signed_href: Optional[str] = None,
+    signed_href: str | None = None,
     out_shape: tuple[int, int] = (64, 64),
     is_mask: bool = False,
 ) -> np.ndarray:
@@ -129,18 +133,22 @@ def _read_band_window(
 def fetch_sentinel2_indices(
     polygon_coords: list[list[float]],
     fallback_cache_dir: str = "fallback_cache",
-    taluk_key: Optional[str] = None,
+    taluk_key: str | None = None,
+    use_fallback: bool = False,
 ) -> dict:
     """
     Main entry point. Returns dict with NDVI, NDMI, NDRE, scene_date,
     cloud_cover_pct, data_source.
-    Falls back to cached JSON if PC is unreachable or geospatial libs missing.
+    Falls back to cached JSON if PC is unreachable, geospatial libs missing,
+    or use_fallback=True.
     """
-    if _GEOSPATIAL_AVAILABLE:
+    if not use_fallback and _GEOSPATIAL_AVAILABLE:
         try:
             return _fetch_from_planetary_computer(polygon_coords)
         except Exception as exc:
-            logger.warning("Planetary Computer fetch failed (%s), loading fallback.", exc)
+            logger.warning(
+                "Planetary Computer fetch failed (%s), loading fallback.", exc
+            )
 
     return _load_fallback(fallback_cache_dir, taluk_key, polygon_coords)
 
@@ -197,18 +205,18 @@ def _fetch_from_planetary_computer(polygon_coords: list[list[float]]) -> dict:
     }
 
 
-def _load_fallback(
+def resolve_fallback_cache_path(
     cache_dir: str,
-    taluk_key: Optional[str],
+    taluk_key: str | None,
     polygon_coords: list[list[float]],
-) -> dict:
-    """Load pre-cached satellite indices from JSON files."""
-    # Map taluk names to cache files
+) -> Path:
+    """Resolve the fallback cache JSON path for a Tumakuru taluk or centroid."""
     taluk_map = {
         "madhugiri": "madhugiri_sample.json",
         "koratagere": "koratagere_sample.json",
         "chikkanayakanahalli": "cnhalli_sample.json",
         "cnhalli": "cnhalli_sample.json",
+        "c.n.halli": "cnhalli_sample.json",
     }
 
     filename = None
@@ -219,33 +227,55 @@ def _load_fallback(
         # Pick nearest by centroid longitude as a simple heuristic
         lon_c, _ = _centroid(polygon_coords)
         if lon_c < 76.8:
-            filename = "madhugiri_sample.json"
-        elif lon_c < 77.2:
-            filename = "koratagere_sample.json"
-        else:
             filename = "cnhalli_sample.json"
+        elif lon_c < 77.22:
+            filename = "madhugiri_sample.json"
+        else:
+            filename = "koratagere_sample.json"
 
-    cache_path = Path(cache_dir) / filename
+    return Path(cache_dir) / filename
+
+
+def load_taluk_cache(
+    cache_dir: str,
+    taluk_key: str | None,
+    polygon_coords: list[list[float]],
+) -> dict | None:
+    """Load full pre-cached JSON payload if available, else None."""
+    cache_path = resolve_fallback_cache_path(cache_dir, taluk_key, polygon_coords)
     if cache_path.exists():
-        with open(cache_path) as f:
+        with open(cache_path, encoding="utf-8") as f:
             data = json.load(f)
         logger.info("Loaded fallback cache from %s", cache_path)
+        return data
+    return None
+
+
+def _load_fallback(
+    cache_dir: str,
+    taluk_key: str | None,
+    polygon_coords: list[list[float]],
+) -> dict:
+    """Load pre-cached satellite indices from JSON files."""
+    data = load_taluk_cache(cache_dir, taluk_key, polygon_coords)
+    if data is not None:
         return {
             "ndvi": data.get("ndvi", 0.32),
             "ndmi": data.get("ndmi", -0.15),
             "ndre": data.get("ndre", 0.21),
-            "scene_date": data.get("scene_date", "2026-10-15"),
+            "scene_date": data.get("scene_date", "2026-10-30"),
             "cloud_cover_pct": data.get("cloud_cover_pct", 5.0),
             "data_source": "fallback_cache",
+            "time_series": data.get("time_series"),
         }
 
-    logger.error("Fallback cache file not found: %s", cache_path)
+    logger.error("Fallback cache file not found in %s", cache_dir)
     # Return synthetic but physically plausible values for Tumakuru dry season
     return {
         "ndvi": 0.28,
         "ndmi": -0.22,
         "ndre": 0.19,
-        "scene_date": "2026-10-01",
+        "scene_date": "2026-10-30",
         "cloud_cover_pct": 0.0,
         "data_source": "synthetic_fallback",
     }

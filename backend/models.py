@@ -4,6 +4,7 @@ FarmPlot  – stores plot metadata and computed indices.
 TelemetryLog – time-series hydro-met readings per plot.
 ClaimDossier – PMFBY PDF claim records with SHA-256 anchoring.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -55,10 +56,10 @@ class FarmPlot(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
     # Relationships
-    telemetry_logs: Mapped[list["TelemetryLog"]] = relationship(
+    telemetry_logs: Mapped[list[TelemetryLog]] = relationship(
         "TelemetryLog", back_populates="plot", cascade="all, delete-orphan"
     )
-    claim_dossiers: Mapped[list["ClaimDossier"]] = relationship(
+    claim_dossiers: Mapped[list[ClaimDossier]] = relationship(
         "ClaimDossier", back_populates="plot", cascade="all, delete-orphan"
     )
 
@@ -90,7 +91,7 @@ class TelemetryLog(Base):
 
     extra_meta: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    plot: Mapped["FarmPlot"] = relationship("FarmPlot", back_populates="telemetry_logs")
+    plot: Mapped[FarmPlot] = relationship("FarmPlot", back_populates="telemetry_logs")
 
 
 class ClaimDossier(Base):
@@ -104,7 +105,9 @@ class ClaimDossier(Base):
 
     # PDF tracking
     pdf_path: Mapped[str] = mapped_column(String(512), nullable=False)
-    sha256_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    sha256_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
     pdf_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Claim payload (JSON snapshot of analysis at claim time)
@@ -114,4 +117,4 @@ class ClaimDossier(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    plot: Mapped["FarmPlot"] = relationship("FarmPlot", back_populates="claim_dossiers")
+    plot: Mapped[FarmPlot] = relationship("FarmPlot", back_populates="claim_dossiers")

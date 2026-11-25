@@ -2,13 +2,18 @@
 SookshmaJal – Sarvam AI Kannada TTS advisory generator.
 Uses Sarvam AI bulbul:v1 for Kannada speech synthesis and
 sarvam-translate:v1 for English→Kannada translation.
-Automatically falls back to English text advisory when API unavailable.
+Automatically falls back to a synthesized playable WAV audio asset and
+pre-translated Kannada guidance text when SARVAM_API_KEY is missing or times out.
 """
+
 from __future__ import annotations
 
 import base64
+import io
 import logging
-from typing import Optional
+import math
+import struct
+import wave
 
 import requests
 
@@ -62,7 +67,54 @@ def _build_advisory_english(
     return base + advice
 
 
-def translate_to_kannada(text_en: str) -> Optional[str]:
+def synthesize_fallback_wav(drought_stage: str = "early_stress") -> str:
+    """
+    Synthesize a valid, playable 22050 Hz 16-bit mono PCM WAV audio chime
+    corresponding to the drought severity stage, encoded as base64.
+    Never raises on error.
+    """
+    sample_rate = 22050
+    tone_patterns: dict[str, list[tuple[float, float]]] = {
+        "healthy": [(523.25, 0.22), (659.25, 0.22), (783.99, 0.32)],
+        "early_stress": [(440.0, 0.25), (392.0, 0.35)],
+        "moderate_drought": [(587.33, 0.22), (440.0, 0.22), (587.33, 0.30)],
+        "severe_drought": [
+            (783.99, 0.18),
+            (659.25, 0.18),
+            (783.99, 0.18),
+            (659.25, 0.30),
+        ],
+    }
+    notes = tone_patterns.get(drought_stage, tone_patterns["early_stress"])
+    gap_samples = int(0.06 * sample_rate)
+
+    frames = bytearray()
+    for freq, dur in notes:
+        n_samples = int(dur * sample_rate)
+        fade_len = max(1, int(0.02 * sample_rate))
+        for i in range(n_samples):
+            env = 1.0
+            if i < fade_len:
+                env = i / fade_len
+            elif i > n_samples - fade_len:
+                env = (n_samples - i) / fade_len
+            sample = int(
+                11000 * env * math.sin(2.0 * math.pi * freq * (i / sample_rate))
+            )
+            frames.extend(struct.pack("<h", sample))
+        frames.extend(b"\x00\x00" * gap_samples)
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(bytes(frames))
+
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def translate_to_kannada(text_en: str) -> str | None:
     """Translate English advisory to Kannada via Sarvam AI."""
     if not settings.SARVAM_API_KEY:
         return None
@@ -91,7 +143,7 @@ def translate_to_kannada(text_en: str) -> Optional[str]:
         return None
 
 
-def synthesize_kannada_tts(text_kn: str) -> Optional[str]:
+def synthesize_kannada_tts(text_kn: str) -> str | None:
     """
     Synthesize Kannada audio via Sarvam bulbul:v1.
     Returns base64-encoded WAV string or None on failure.
@@ -128,6 +180,45 @@ def synthesize_kannada_tts(text_kn: str) -> Optional[str]:
         return None
 
 
+def build_kannada_advisory_text(
+    drought_stage: str,
+    et0: float,
+    survival_liters: float,
+    ndmi: float,
+    crop_type: str = "",
+) -> str:
+    """
+    Return a pre-translated, stage-specific Kannada advisory string for offline fallback.
+    """
+    crop_prefix = f"{crop_type} ಬೆಳೆಗೆ " if crop_type else "ನಿಮ್ಮ ಬೆಳೆಗೆ "
+    daily_l = survival_liters / 7.0
+
+    if drought_stage == "healthy":
+        return (
+            f"{crop_prefix}ತೇವಾಂಶ ಸಮರ್ಪಕವಾಗಿದೆ (NDMI {ndmi:.2f}). "
+            f"ದೈನಿಕ ನೀರಿನ ಅವಶ್ಯಕತೆ {et0:.1f} ಮಿ.ಮೀ (ಸುಮಾರು {daily_l:,.0f} ಲೀಟರ್/ದಿನ). "
+            "ಬೋರ್‌ವೆಲ್ ಅತಿಯಾದ ಪಂಪಿಂಗ್ ತಪ್ಪಿಸಿ, ಹೂಬಿಡುವ ಹಂತದಲ್ಲಿ ನಿಯಮಿತ ನೀರಾವರಿ ಮುಂದುವರಿಸಿ."
+        )
+    elif drought_stage == "early_stress":
+        return (
+            f"{crop_prefix}ಆರಂಭಿಕ ತೇವಾಂಶ ಒತ್ತಡ ಪತ್ತೆಯಾಗಿದೆ (NDMI {ndmi:.2f}). "
+            f"ಮುಂದಿನ 7 ದಿನಗಳಿಗೆ ಕನಿಷ್ಠ {survival_liters:,.0f} ಲೀಟರ್ (ದಿನಕ್ಕೆ {daily_l:,.0f} ಲೀ) ಜೀವ ರಕ್ಷಕ ನೀರು ಅಗತ್ಯ. "
+            "ಹೊದಿಕೆ (ಮಲ್ಚ್) ಹಾಕಿ, ಹನಿ ನೀರಾವರಿ ಮೂಲಕ ಬೇರಿಗೆ ಮಾತ್ರ ನೀರು ನೀಡಿ."
+        )
+    elif drought_stage == "moderate_drought":
+        return (
+            f"{crop_prefix}ಮಧ್ಯಮ ಬರ ಒತ್ತಡದಲ್ಲಿದೆ (NDMI {ndmi:.2f}). "
+            f"ತಕ್ಷಣ 7 ದಿನಗಳಲ್ಲಿ {survival_liters:,.0f} ಲೀಟರ್ (ದಿನಕ್ಕೆ {daily_l:,.0f} ಲೀ) ಮಿತ ನೀರಾವರಿ ನೀಡಿ. "
+            "ಹೂಬಿಡುವ/ಕಾಳು ಕಟ್ಟುವ ಹಂತವನ್ನು ಉಳಿಸಲು ತಾಲ್ಲೂಕು ಕೃಷಿ ಅಧಿಕಾರಿಯನ್ನು ಸಂಪರ್ಕಿಸಿ ಮತ್ತು PMFBY ದಾಖಲಾತಿ ಆರಂಭಿಸಿ."
+        )
+    else:
+        return (
+            f"ತುರ್ತು ಎಚ್ಚರಿಕೆ: {crop_prefix}ತೀವ್ರ ಬರ ಒತ್ತಡ ಪತ್ತೆಯಾಗಿದೆ (NDMI {ndmi:.2f}). "
+            f"ಬೆಳೆ ಉಳಿಸಲು {survival_liters:,.0f} ಲೀಟರ್ ತುರ್ತು ನೀರು ಅಗತ್ಯ; ಬೋರ್‌ವೆಲ್ ಖಾಲಿ ಮಾಡದೆ ಬೇರಿಗೆ ನೀರು ಹಾಯಿಸಿ. "
+            "ಈಗಲೇ PMFBY ಬೆಳೆ ನಷ್ಟ ದಾವೆ ಸಲ್ಲಿಸಿ ಮತ್ತು ಹೊಲದ ಛಾಯಾಚಿತ್ರ ಸಂಗ್ರಹಿಸಿ."
+        )
+
+
 def generate_voice_advisory(
     farmer_name: str,
     crop_type: str,
@@ -136,55 +227,42 @@ def generate_voice_advisory(
     survival_liters: float,
     ndvi: float,
     ndmi: float,
-) -> tuple[Optional[str], str]:
+) -> tuple[str | None, str]:
     """
     Generate Kannada voice advisory.
-    Returns (audio_base64_or_None, advisory_text_kn_or_en).
+    Returns (audio_base64, advisory_text_kn).
+    Never raises — gracefully falls back to synthesized WAV + Kannada text when
+    SARVAM_API_KEY is missing, times out, or fails.
     """
     text_en = _build_advisory_english(
         farmer_name, crop_type, drought_stage, et0, survival_liters, ndvi, ndmi
     )
+    fallback_kn = build_kannada_advisory_text(
+        drought_stage=drought_stage,
+        et0=et0,
+        survival_liters=survival_liters,
+        ndmi=ndmi,
+        crop_type=crop_type,
+    )
 
-    # Try full Sarvam pipeline
-    text_kn = translate_to_kannada(text_en)
-    if text_kn:
-        audio_b64 = synthesize_kannada_tts(text_kn)
-        if audio_b64:
-            logger.info("Sarvam TTS pipeline succeeded for farmer %s.", farmer_name)
-            return audio_b64, text_kn
+    try:
+        # Try full Sarvam pipeline
+        text_kn = translate_to_kannada(text_en)
+        if text_kn:
+            audio_b64 = synthesize_kannada_tts(text_kn)
+            if audio_b64:
+                logger.info("Sarvam TTS pipeline succeeded for farmer %s.", farmer_name)
+                return audio_b64, text_kn
+    except Exception as exc:
+        logger.warning("Sarvam voice pipeline exception (%s); using WAV fallback.", exc)
 
-    # Fallback: return English text, no audio
-    logger.info("Using fallback text advisory for farmer %s.", farmer_name)
-    return None, text_en
-
-
-def build_kannada_advisory_text(
-    drought_stage: str,
-    et0: float,
-    survival_liters: float,
-    ndmi: float,
-) -> str:
-    """
-    Return a minimal pre-translated Kannada advisory string for offline fallback.
-    These are real Kannada translations of the core messages.
-    """
-    if drought_stage == "healthy":
-        return (
-            f"ನಿಮ್ಮ ಬೆಳೆ ಆರೋಗ್ಯಕರವಾಗಿದೆ. ದೈನಿಕ ನೀರಿನ ಅವಶ್ಯಕತೆ {et0:.1f} ಮಿ.ಮೀ. "
-            "ನಿಯಮಿತ ನೀರಾವರಿ ಮುಂದುವರಿಸಿ."
-        )
-    elif drought_stage == "early_stress":
-        return (
-            f"ಆರಂಭಿಕ ತೇವಾಂಶ ಒತ್ತಡ ಪತ್ತೆಯಾಗಿದೆ. 7 ದಿನಗಳಲ್ಲಿ {survival_liters:.0f} ಲೀಟರ್ ನೀರು ಬೇಕು. "
-            "ನೀರಾವರಿ ಹೆಚ್ಚಿಸಿ."
-        )
-    elif drought_stage == "moderate_drought":
-        return (
-            f"ಮಧ್ಯಮ ಬರ ಒತ್ತಡ. {survival_liters:.0f} ಲೀಟರ್ ನೀರು ತಕ್ಷಣ ನೀಡಿ. "
-            "ತಾಲ್ಲೂಕು ಕೃಷಿ ಅಧಿಕಾರಿಯನ್ನು ಸಂಪರ್ಕಿಸಿ."
-        )
-    else:
-        return (
-            f"ಎಚ್ಚರಿಕೆ: ತೀವ್ರ ಬರ. {survival_liters:.0f} ಲೀಟರ್ ನೀರು ತಕ್ಷಣ ಅಗತ್ಯ. "
-            "PMFBY ಬೆಳೆ ನಷ್ಟ ದಾವೆ ಸಲ್ಲಿಸಿ."
-        )
+    # Graceful offline / timeout fallback: playable WAV asset + Kannada advisory text
+    logger.info(
+        "Using synthesized WAV + Kannada text fallback for farmer %s.", farmer_name
+    )
+    try:
+        fallback_wav = synthesize_fallback_wav(drought_stage)
+    except Exception as exc:
+        logger.error("Fallback WAV synthesis error: %s", exc)
+        fallback_wav = None
+    return fallback_wav, fallback_kn

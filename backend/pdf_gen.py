@@ -7,13 +7,13 @@ Generates a verifiable PDF with:
   • SHA-256 content hash embedded in document
   • QR code linking to /api/verify/{sha256_hash} for tamper-evident ground-truthing
 """
+
 from __future__ import annotations
 
 import hashlib
 import io
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +34,7 @@ try:
         Table,
         TableStyle,
     )
+
     _REPORTLAB_AVAILABLE = True
 except ImportError:
     _REPORTLAB_AVAILABLE = False
@@ -41,6 +42,7 @@ except ImportError:
 
 try:
     import qrcode
+
     _QRCODE_AVAILABLE = True
 except ImportError:
     _QRCODE_AVAILABLE = False
@@ -175,20 +177,37 @@ def generate_pmfby_pdf(
     c_primary = _hex_to_rl_color(COLOR_PRIMARY_TEXT)
     c_accent = _hex_to_rl_color(COLOR_ACCENT_BLUE)
     c_secondary = _hex_to_rl_color(COLOR_SECONDARY_TEXT)
-    c_surface = _hex_to_rl_color(COLOR_SURFACE)
 
-    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=20, textColor=c_primary, spaceAfter=4)
-    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=14, textColor=c_accent, spaceAfter=4)
-    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=10, textColor=c_primary, leading=14)
-    caption = ParagraphStyle("caption", parent=styles["Normal"], fontSize=8, textColor=c_secondary, leading=11)
+    h1 = ParagraphStyle(
+        "h1", parent=styles["Heading1"], fontSize=20, textColor=c_primary, spaceAfter=4
+    )
+    h2 = ParagraphStyle(
+        "h2", parent=styles["Heading2"], fontSize=14, textColor=c_accent, spaceAfter=4
+    )
+    body = ParagraphStyle(
+        "body", parent=styles["Normal"], fontSize=10, textColor=c_primary, leading=14
+    )
+    caption = ParagraphStyle(
+        "caption",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=c_secondary,
+        leading=11,
+    )
     bold_body = ParagraphStyle("bold_body", parent=body, fontName="Helvetica-Bold")
 
     story = []
 
     # ── Header ──────────────────────────────────────────────────────────────
     story.append(Paragraph("SookshmaJal — PMFBY Drought Loss Dossier", h1))
-    story.append(Paragraph(f"Team VECTORZZ · Hackwarts 2026 · Generated: {generated_at}", caption))
-    story.append(HRFlowable(width="100%", thickness=1, color=_hex_to_rl_color(COLOR_SURFACE)))
+    story.append(
+        Paragraph(
+            f"Team VECTORZZ · Hackwarts 2026 · Generated: {generated_at}", caption
+        )
+    )
+    story.append(
+        HRFlowable(width="100%", thickness=1, color=_hex_to_rl_color(COLOR_SURFACE))
+    )
     story.append(Spacer(1, 6 * mm))
 
     # ── Farmer & Plot Details ───────────────────────────────────────────────
@@ -206,16 +225,25 @@ def generate_pmfby_pdf(
         ["Data Source", data_source],
     ]
     farm_table = Table(farm_data, colWidths=[60 * mm, 110 * mm])
-    farm_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), c_accent),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _hex_to_rl_color(COLOR_SURFACE)]),
-        ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    farm_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), c_accent),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, _hex_to_rl_color(COLOR_SURFACE)],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
     story.append(farm_table)
     story.append(Spacer(1, 6 * mm))
 
@@ -228,20 +256,44 @@ def generate_pmfby_pdf(
         ["NDRE (Red-Edge Chlorophyll)", f"{ndre:.4f}", _ndre_interp(ndre)],
     ]
     sat_table = Table(sat_data, colWidths=[65 * mm, 30 * mm, 75 * mm])
-    sat_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), _drought_color(drought_stage)),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _hex_to_rl_color(COLOR_SURFACE)]),
-        ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    sat_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), _drought_color(drought_stage)),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, _hex_to_rl_color(COLOR_SURFACE)],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
     story.append(sat_table)
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(f"<b>Drought Assessment: {stage_label}</b>", bold_body))
     story.append(Paragraph(f"Recommendation: {rec_en}", body))
+
+    ts = payload.get("time_series") or {}
+    if ts.get("dates"):
+        onset_date = (
+            ts.get("stress_onset_date") or "None detected (within normal baseline)"
+        )
+        days_since = ts.get("days_since_stress_onset")
+        onset_note = f"Mid-Season Stress Onset: <b>{onset_date}</b>" + (
+            f" ({days_since} days prior to latest scene — post-harvest audit trail anchored)"
+            if days_since
+            else ""
+        )
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(onset_note, body))
+
     story.append(Spacer(1, 6 * mm))
 
     # ── Hydro-Met Data ──────────────────────────────────────────────────────
@@ -255,16 +307,25 @@ def generate_pmfby_pdf(
         ["Survival Water Needed (7-day)", f"{v_surv:,.0f} litres"],
     ]
     hm_table = Table(hm_data, colWidths=[90 * mm, 80 * mm])
-    hm_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), c_accent),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _hex_to_rl_color(COLOR_SURFACE)]),
-        ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    hm_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), c_accent),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [colors.white, _hex_to_rl_color(COLOR_SURFACE)],
+                ),
+                ("GRID", (0, 0), (-1, -1), 0.5, _hex_to_rl_color("#D2D2D7")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]
+        )
+    )
     story.append(hm_table)
     story.append(Spacer(1, 6 * mm))
 
@@ -273,12 +334,14 @@ def generate_pmfby_pdf(
     sha256 = _sha256_bytes(content_for_hash)
 
     story.append(Paragraph("4. Tamper-Evident SHA-256 Ground-Truth Hash", h2))
-    story.append(Paragraph(
-        "This dossier is cryptographically anchored to the analysis payload. "
-        "The SHA-256 hash below uniquely identifies this claim and can be verified "
-        "at the SookshmaJal verification endpoint.",
-        body,
-    ))
+    story.append(
+        Paragraph(
+            "This dossier is cryptographically anchored to the analysis payload. "
+            "The SHA-256 hash below uniquely identifies this claim and can be verified "
+            "at the SookshmaJal verification endpoint.",
+            body,
+        )
+    )
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph(f"<font name='Courier' size='8'>{sha256}</font>", body))
     story.append(Spacer(1, 4 * mm))
@@ -293,16 +356,20 @@ def generate_pmfby_pdf(
     story.append(Spacer(1, 6 * mm))
 
     # ── Disclaimer ───────────────────────────────────────────────────────────
-    story.append(HRFlowable(width="100%", thickness=0.5, color=_hex_to_rl_color(COLOR_SURFACE)))
+    story.append(
+        HRFlowable(width="100%", thickness=0.5, color=_hex_to_rl_color(COLOR_SURFACE))
+    )
     story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph(
-        "DISCLAIMER: This dossier is generated by SookshmaJal, an AI-assisted satellite "
-        "remote sensing tool, for the purpose of PMFBY crop insurance claim support. "
-        "The indices and assessments herein are derived from Sentinel-2 L2A satellite data "
-        "and Open-Meteo weather APIs. This document does not constitute a final insurance "
-        "claim determination. Field verification by a licensed agronomist is recommended.",
-        caption,
-    ))
+    story.append(
+        Paragraph(
+            "DISCLAIMER: This dossier is generated by SookshmaJal, an AI-assisted satellite "
+            "remote sensing tool, for the purpose of PMFBY crop insurance claim support. "
+            "The indices and assessments herein are derived from Sentinel-2 L2A satellite data "
+            "and Open-Meteo weather APIs. This document does not constitute a final insurance "
+            "claim determination. Field verification by a licensed agronomist is recommended.",
+            caption,
+        )
+    )
 
     # ── Build PDF bytes ──────────────────────────────────────────────────────
     doc.build(story)
