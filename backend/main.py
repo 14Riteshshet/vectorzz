@@ -698,6 +698,7 @@ async def analyze_plot(
     # ── 6. PMFBY PDF ─────────────────────────────────────────────────────────
     pdf_sha256: Optional[str] = None
     pdf_download_url: Optional[str] = None
+    dossier_id: Optional[str] = None
 
     sat_payload = {k: v for k, v in sat_raw.items() if k != "time_series"}
     claim_payload = {
@@ -752,6 +753,7 @@ async def analyze_plot(
             )
             db.add(db_claim)
             await db.flush()
+            dossier_id = db_claim.id
 
     except Exception as exc:
         logger.warning("PDF generation failed (non-fatal): %s", exc)
@@ -794,6 +796,7 @@ async def analyze_plot(
         audio_source=audio_source,
         pdf_sha256=pdf_sha256,
         pdf_download_url=pdf_download_url,
+        dossier_id=dossier_id,
         analysed_at=analysed_at,
     )
 
@@ -848,33 +851,68 @@ async def verify_dossier(sha256_hash: str, db: DbSession):
 
 
 @app.get("/api/plots", response_model=PlotsListResponse, tags=["Plots"])
-async def list_plots(db: DbSession):
+async def list_plots(request: Request, db: DbSession):
     """Return a summary list of all analysed farm plots."""
-    stmt = select(FarmPlot).order_by(FarmPlot.created_at.desc()).limit(100)
+    stmt = (
+        select(FarmPlot)
+        .options(selectinload(FarmPlot.claim_dossiers))
+        .order_by(FarmPlot.created_at.desc())
+        .limit(100)
+    )
     result = await db.execute(stmt)
     plots = result.scalars().all()
+    base_url = str(request.base_url).rstrip("/")
 
-    summaries = [
-        PlotSummary(
-            plot_id=p.id,
-            farmer_name=p.farmer_name,
-            taluk=p.taluk,
-            crop_type=p.crop_type,
-            area_acres=p.area_acres,
-            drought_stage=p.drought_stage,
-            ndvi=p.ndvi,
-            ndmi=p.ndmi,
-            created_at=p.created_at.isoformat(),
+    summaries = []
+    for p in plots:
+        latest_dossier = (
+            max(p.claim_dossiers, key=lambda d: d.generated_at)
+            if p.claim_dossiers
+            else None
         )
-        for p in plots
-    ]
+        photo_url = (
+            f"{base_url}/api/photos/{Path(p.photo_path).name}"
+            if p.photo_path
+            else None
+        )
+        pdf_url = (
+            f"{base_url}/api/pdf/{Path(latest_dossier.pdf_path).name}"
+            if latest_dossier and latest_dossier.pdf_path
+            else None
+        )
+        summaries.append(
+            PlotSummary(
+                plot_id=p.id,
+                farmer_name=p.farmer_name,
+                taluk=p.taluk,
+                village=p.village,
+                survey_no=p.survey_no,
+                crop_type=p.crop_type,
+                area_acres=p.area_acres,
+                drought_stage=p.drought_stage,
+                ndvi=p.ndvi,
+                ndmi=p.ndmi,
+                photo_url=photo_url,
+                photo_sha256=p.photo_sha256,
+                photo_lat=p.photo_lat,
+                photo_lon=p.photo_lon,
+                geolock_status=p.geolock_status or "MISSING_GPS",
+                photo_attached=bool(p.photo_path),
+                dossier_id=latest_dossier.id if latest_dossier else None,
+                dossier_hash=latest_dossier.sha256_hash if latest_dossier else None,
+                pdf_download_url=pdf_url,
+                created_at=p.created_at.isoformat(),
+            )
+        )
     return PlotsListResponse(total=len(summaries), plots=summaries)
 
 
 @app.get("/api/history", response_model=PlotsListResponse, tags=["Plots"])
-async def list_history_protected(db: DbSession, _officer: OfficerUser):
+async def list_history_protected(
+    request: Request, db: DbSession, _officer: OfficerUser
+):
     """Protected all-farmers history endpoint for authenticated Regional Officers."""
-    return await list_plots(db)
+    return await list_plots(request, db)
 
 
 def _extract_polygon_coords(polygon_geojson: str) -> list[list[float]]:
@@ -1017,6 +1055,7 @@ async def regional_summary(
                 scene_date=latest_telem.scene_date if latest_telem else None,
                 data_source=latest_telem.data_source if latest_telem else "database",
                 created_at=p.created_at.isoformat(),
+                dossier_id=latest_dossier.id if latest_dossier else None,
                 dossier_hash=latest_dossier.sha256_hash if latest_dossier else None,
                 pdf_download_url=pdf_url,
                 is_verified=bool(latest_dossier.is_verified) if latest_dossier else False,

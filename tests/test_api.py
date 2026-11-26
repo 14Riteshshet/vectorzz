@@ -885,3 +885,94 @@ async def test_analyze_plot_with_cadastral_metadata(
     assert data["hobli"] == "Kasaba"
     assert data["survey_no"] == "31/1"
     assert data["pdf_sha256"] and len(data["pdf_sha256"]) == 64
+
+
+@pytest.mark.anyio
+async def test_farmer_entry_persistence_photo_serving_and_ui_separation(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Submitted farmer entry + photo + dossier_id persist in DB and Officer/Farmer UI stay separated."""
+    buf = io.BytesIO()
+    PILImage.new("RGB", (64, 48), color=(34, 139, 34)).save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    expected_sha = hashlib.sha256(png_bytes).hexdigest()
+    photo_b64 = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+
+    pdf_dir = tmp_path / "pdfs"
+    photo_dir = tmp_path / "photos"
+    payload = {
+        **VALID_PAYLOAD,
+        "farmer_name": "Siddappa Persistence",
+        "taluk": "Madhugiri",
+        "village": "Kodigenahalli",
+        "survey_no": "42/1",
+        "irrigation_source": "Borewell",
+        "observed_symptoms": ["Leaf Wilting"],
+        "use_fallback": True,
+        "photo_base64": photo_b64,
+        "photo_filename": "field_proof.png",
+        "photo_lat": 13.6621,
+        "photo_lon": 77.2017,
+        "photo_timestamp": "2026-10-30T10:30:00Z",
+    }
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(pdf_dir)),
+        patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)),
+    ):
+        resp = await async_client.post("/api/analyze-plot", json=payload)
+
+    assert resp.status_code == 200, resp.text
+    created = resp.json()
+    assert created["dossier_id"]
+    assert created["photo_attached"] is True
+    assert created["photo_sha256"] == expected_sha
+    assert created["geolock_status"] == "VERIFIED_IN_REGION"
+
+    # Officer login required for regional summary, history, and photo file
+    from backend.config import get_settings
+
+    cfg = get_settings()
+    login_resp = await async_client.post(
+        "/api/officer/login",
+        json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+    )
+    assert login_resp.status_code == 200
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    reg_resp = await async_client.get("/api/regional/summary?taluk=Madhugiri", headers=headers)
+    assert reg_resp.status_code == 200
+    reg_plots = reg_resp.json()["plots"]
+    matched = next(p for p in reg_plots if p["plot_id"] == created["plot_id"])
+    assert matched["farmer_name"] == "Siddappa Persistence"
+    assert matched["village"] == "Kodigenahalli"
+    assert matched["survey_no"] == "42/1"
+    assert matched["photo_sha256"] == expected_sha
+    assert matched["photo_lat"] == pytest.approx(13.6621)
+    assert matched["photo_lon"] == pytest.approx(77.2017)
+    assert matched["geolock_status"] == "VERIFIED_IN_REGION"
+    assert matched["dossier_id"] == created["dossier_id"]
+    assert matched["dossier_hash"] == created["pdf_sha256"]
+    assert matched["photo_url"]
+
+    hist_resp = await async_client.get("/api/history", headers=headers)
+    assert hist_resp.status_code == 200
+    hist_match = next(p for p in hist_resp.json()["plots"] if p["plot_id"] == created["plot_id"])
+    assert hist_match["photo_sha256"] == expected_sha
+    assert hist_match["dossier_id"] == created["dossier_id"]
+    assert hist_match["survey_no"] == "42/1"
+
+    photo_path_part = "/api/photos/" + matched["photo_url"].split("/api/photos/", 1)[1]
+    assert (await async_client.get(photo_path_part)).status_code == 401
+    with patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)):
+        photo_resp = await async_client.get(photo_path_part, headers=headers)
+    assert photo_resp.status_code == 200
+    assert photo_resp.content == png_bytes
+
+    # Verify UI separation & photo thumbnail hooks in frontend assets
+    html_text = (Path(__file__).parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    js_text = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+    assert 'id="regional-monitor-section"' in html_text
+    assert 'id="farmer-proof-photo-img"' in html_text
+    assert 'id="farmer-elig-photo-img"' in html_text
+    assert "loadAuthenticatedPhotoThumbs" in js_text
+    assert "pmfby-guidelines-section" in js_text

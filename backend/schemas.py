@@ -237,6 +237,7 @@ class AnalyzePlotResponse(BaseModel):
     audio_source: str = "text_only"
     pdf_sha256: str | None = None
     pdf_download_url: str | None = None
+    dossier_id: str | None = None
     analysed_at: str
 
 
@@ -256,11 +257,23 @@ class PlotSummary(BaseModel):
     plot_id: str
     farmer_name: str
     taluk: str
+    village: str | None = None
+    survey_no: str | None = None
     crop_type: str
     area_acres: float
     drought_stage: str | None
     ndvi: float | None
     ndmi: float | None
+    photo_url: str | None = None
+    photo_sha256: str | None = None
+    photo_lat: float | None = None
+    photo_lon: float | None = None
+    geolock_status: str = "MISSING_GPS"
+    photo_attached: bool = False
+    dossier_id: str | None = None
+    dossier_id: str | None = None
+    dossier_hash: str | None = None
+    pdf_download_url: str | None = None
     created_at: str
 
 
@@ -307,6 +320,7 @@ class RegionalPlotItem(BaseModel):
     scene_date: str | None = None
     data_source: str = "database"
     created_at: str
+    dossier_id: str | None = None
     dossier_hash: str | None = None
     pdf_download_url: str | None = None
     is_verified: bool = False

@@ -905,6 +905,10 @@ function setMode(mode) {
 
   document.getElementById('farmer-view').style.display = mode === 'farmer' ? 'block' : 'none';
   document.getElementById('officer-view').style.display = mode === 'officer' ? 'block' : 'none';
+  var $pmfbyGuide = document.getElementById('pmfby-guidelines-section');
+  if ($pmfbyGuide) {
+    $pmfbyGuide.style.display = mode === 'farmer' ? 'block' : 'none';
+  }
   var $regSection = document.getElementById('regional-monitor-section');
   if ($regSection) {
     $regSection.style.display = mode === 'officer' ? 'block' : 'none';
@@ -999,6 +1003,20 @@ function renderResults(data) {
         $farmerPdfLink.style.display = 'inline-flex';
       } else {
         $farmerPdfLink.style.display = 'none';
+      }
+    }
+    var $eligPhotoWrap = document.getElementById('farmer-elig-photo-wrap');
+    var $eligPhotoImg = document.getElementById('farmer-elig-photo-img');
+    var $eligPhotoMeta = document.getElementById('farmer-elig-photo-meta');
+    if ($eligPhotoWrap && $eligPhotoImg && $eligPhotoMeta) {
+      if (data.photo_attached && capturedPhotoData && capturedPhotoData.base64) {
+        $eligPhotoImg.src = capturedPhotoData.base64;
+        $eligPhotoMeta.textContent = 'Field Photo Proof · ' + (data.geolock_status || 'MISSING_GPS') +
+          (data.photo_sha256 ? ' · SHA-256: ' + data.photo_sha256.slice(0, 14) + '…' : '');
+        $eligPhotoWrap.style.display = 'flex';
+      } else {
+        $eligPhotoImg.removeAttribute('src');
+        $eligPhotoWrap.style.display = 'none';
       }
     }
   }
@@ -1511,18 +1529,31 @@ function renderPlots(data) {
     var cls = stageClass(p.drought_stage || '');
     var ndviTxt = p.ndvi != null ? 'NDVI ' + Number(p.ndvi).toFixed(2) : '';
     var ndmiTxt = p.ndmi != null ? 'NDMI ' + Number(p.ndmi).toFixed(2) : '';
-    var indices = [ndviTxt, ndmiTxt].filter(Boolean).join(' · ');
+    var surveyTxt = p.survey_no ? ('Sy. ' + p.survey_no + (p.village ? ' (' + p.village + ')' : '')) : (p.village || '');
+    var indices = [surveyTxt, ndviTxt, ndmiTxt].filter(Boolean).join(' · ');
+    var thumbHtml = p.photo_url
+      ? '<img class="audit-photo-thumb" data-auth-photo-url="' + escHtml(p.photo_url) + '" alt="Field photo for ' + escHtml(p.farmer_name) + '" />'
+      : '';
+    var gpsStatus = p.geolock_status || 'MISSING_GPS';
+    var photoMeta = p.photo_sha256
+      ? (' · ' + gpsStatus + ' · Photo SHA-256: ' + p.photo_sha256.slice(0, 12) + '…')
+      : (' · ' + gpsStatus);
+    var pdfLink = p.pdf_download_url
+      ? ' <a href="' + escHtml(p.pdf_download_url) + '" download class="btn-secondary regional-row-btn" style="text-decoration:none;margin-left:6px;">⬇ PDF</a>'
+      : '';
     return '<div class="plot-row" role="listitem">' +
-      '<div><div class="plot-row-name">' + escHtml(p.farmer_name) + '</div>' +
+      (thumbHtml ? '<div style="margin-right:10px;">' + thumbHtml + '</div>' : '') +
+      '<div style="flex:1;"><div class="plot-row-name">' + escHtml(p.farmer_name) + '</div>' +
       '<div class="plot-row-meta">' + escHtml(p.crop_type) + ' · ' + escHtml(p.taluk) + ' · ' + p.area_acres.toFixed(1) + ' ac' +
-      (indices ? ' · ' + indices : '') + '</div></div>' +
+      (indices ? ' · ' + escHtml(indices) : '') + escHtml(photoMeta) + '</div></div>' +
       '<span class="drought-badge ' + cls + '" style="font-size:var(--text-base);padding:var(--space-1) var(--space-4);">' +
         escHtml((p.drought_stage || 'unknown').replace('_', ' ')) + '</span>' +
-      '<div class="plot-row-meta">' + new Date(p.created_at).toLocaleString('en-IN') + '</div>' +
+      '<div class="plot-row-meta">' + new Date(p.created_at).toLocaleString('en-IN') + pdfLink + '</div>' +
       '</div>';
   }).join('');
   container.innerHTML = '<div class="plots-list" role="list">' + rows + '</div>' +
     '<p style="font-size:var(--text-base);color:var(--color-4);margin-top:var(--space-5);">' + data.total + ' plot' + (data.total !== 1 ? 's' : '') + ' total</p>';
+  loadAuthenticatedPhotoThumbs(container);
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -1700,7 +1731,7 @@ function updatePmfbyGuidelinesUI(analysisData) {
   var $vBtn = document.getElementById('btn-trust-verify');
   if ($dId && $pHash && $dHash && $satTs) {
     if (analysisData) {
-      $dId.textContent = analysisData.plot_id || '—';
+      $dId.textContent = analysisData.dossier_id || analysisData.plot_id || '—';
       $pHash.textContent = analysisData.photo_sha256 || 'No camera photo uploaded';
       $dHash.textContent = analysisData.pdf_sha256 || 'Pending PDF generation';
       $satTs.textContent = (analysisData.satellite && analysisData.satellite.scene_date) || analysisData.analysed_at || '—';
@@ -1711,6 +1742,23 @@ function updatePmfbyGuidelinesUI(analysisData) {
       $dHash.textContent = '—';
       $satTs.textContent = '—';
       if ($vBtn) $vBtn.disabled = true;
+    }
+  }
+  var $proofPhotoWrap = document.getElementById('farmer-proof-photo-wrap');
+  var $proofPhotoImg = document.getElementById('farmer-proof-photo-img');
+  var $proofPhotoMeta = document.getElementById('farmer-proof-photo-meta');
+  if ($proofPhotoWrap && $proofPhotoImg && $proofPhotoMeta) {
+    var hasLocalPhoto = Boolean(capturedPhotoData && capturedPhotoData.base64);
+    if (hasLocalPhoto && (!analysisData || analysisData.photo_attached)) {
+      $proofPhotoImg.src = capturedPhotoData.base64;
+      $proofPhotoMeta.textContent = analysisData
+        ? ('Saved Field Photo · ' + (analysisData.geolock_status || 'MISSING_GPS') +
+           (analysisData.photo_sha256 ? ' · SHA-256: ' + analysisData.photo_sha256.slice(0, 14) + '…' : ''))
+        : ('Attached Field Photo ready for submission (' + (capturedPhotoData.filename || 'photo') + ')');
+      $proofPhotoWrap.style.display = 'flex';
+    } else {
+      $proofPhotoImg.removeAttribute('src');
+      $proofPhotoWrap.style.display = 'none';
     }
   }
 }
@@ -1757,6 +1805,22 @@ async function authFetchJSON(url, options) {
     throw new Error(detail);
   }
   return res.json();
+}
+
+function loadAuthenticatedPhotoThumbs(containerEl) {
+  if (!containerEl || !officerToken) return;
+  containerEl.querySelectorAll('img[data-auth-photo-url]').forEach(async function(img) {
+    var url = img.getAttribute('data-auth-photo-url');
+    if (!url) return;
+    try {
+      var res = await fetch(url, {
+        headers: { Authorization: 'Bearer ' + officerToken }
+      });
+      if (!res.ok) return;
+      var blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    } catch (e) {}
+  });
 }
 
 async function openOfficerPhotoPreview(plotId) {
@@ -1894,7 +1958,11 @@ function renderRegionalTable(plots) {
     var photoCell = '<span class="geolock-pill ' + gCls + '" title="' + escHtml(matchTxt) + '">' +
       escHtml(gStatus) + escHtml(distLabel) + '</span>' +
       (p.photo_url
-        ? '<br/><button type="button" class="btn-secondary regional-row-btn" style="margin-top:4px;" data-view-photo="' +
+        ? '<img class="audit-photo-thumb" data-auth-photo-url="' + escHtml(p.photo_url) +
+            '" data-view-photo="' + escHtml(p.plot_id) +
+            '" alt="Field photo for ' + escHtml(p.farmer_name) + '" />' +
+          (p.photo_sha256 ? '<div class="audit-photo-hash">SHA: ' + escHtml(p.photo_sha256.slice(0, 12)) + '…</div>' : '') +
+          '<button type="button" class="btn-secondary regional-row-btn" style="margin-top:3px;" data-view-photo="' +
             escHtml(p.plot_id) + '">📷 View Photo</button>'
         : '');
 
@@ -1941,6 +2009,8 @@ function renderRegionalTable(plots) {
       selectRegionalPlot(btn.dataset.generatePlot, true);
     });
   });
+
+  loadAuthenticatedPhotoThumbs($tbody);
 }
 
 async function selectRegionalPlot(plotId, triggerDossier) {

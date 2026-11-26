@@ -511,6 +511,10 @@
                 <div class="eligibility-badge" id="farmer-eligibility-badge">—</div>
                 <p class="eligibility-text" id="farmer-eligibility-text"></p>
                 <div class="geolock-status-line" id="farmer-geolock-pill"></div>
+                <div id="farmer-elig-photo-wrap" class="farmer-proof-photo-wrap" style="display:none;">
+                  <img id="farmer-elig-photo-img" class="farmer-proof-thumb" alt="Uploaded field photo" />
+                  <div id="farmer-elig-photo-meta" class="farmer-proof-meta"></div>
+                </div>
               </div>
               <a id="farmer-pdf-receipt-link" href="#" download class="btn-primary" style="display:none;text-decoration:none;">
                 ⬇ Download Personal PMFBY Receipt (PDF)
@@ -774,6 +778,10 @@
                 <div><span>Photo SHA-256:</span> <code id="trust-photo-hash">—</code></div>
                 <div><span>Dossier SHA-256:</span> <code id="trust-dossier-hash">—</code></div>
                 <div><span>Satellite Timestamp:</span> <strong id="trust-sat-timestamp">—</strong></div>
+              </div>
+              <div id="farmer-proof-photo-wrap" class="farmer-proof-photo-wrap" style="display:none;">
+                <img id="farmer-proof-photo-img" class="farmer-proof-thumb" alt="Uploaded field photo proof" />
+                <div id="farmer-proof-photo-meta" class="farmer-proof-meta"></div>
               </div>
               <div class="pmfby-proof-actions">
                 <button type="button" class="btn-secondary" id="btn-trust-verify" style="padding:var(--space-2) var(--space-5);font-size:13px;" disabled>
