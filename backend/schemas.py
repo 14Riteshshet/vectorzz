@@ -238,6 +238,10 @@ class AnalyzePlotResponse(BaseModel):
     pdf_sha256: str | None = None
     pdf_download_url: str | None = None
     dossier_id: str | None = None
+    entry_source: str = "Live Farmer Entry"
+    audit_status: str = "PENDING"
+    officer_remark: str | None = None
+    reviewed_at: str | None = None
     analysed_at: str
 
 
@@ -274,6 +278,10 @@ class PlotSummary(BaseModel):
     dossier_id: str | None = None
     dossier_hash: str | None = None
     pdf_download_url: str | None = None
+    entry_source: str = "Live Farmer Entry"
+    audit_status: str = "PENDING"
+    officer_remark: str | None = None
+    reviewed_at: str | None = None
     created_at: str
 
 
@@ -323,6 +331,10 @@ class RegionalPlotItem(BaseModel):
     dossier_id: str | None = None
     dossier_hash: str | None = None
     pdf_download_url: str | None = None
+    entry_source: str = "Live Farmer Entry"
+    audit_status: str = "PENDING"
+    officer_remark: str | None = None
+    reviewed_at: str | None = None
     is_verified: bool = False
     time_series: TimeSeriesData = Field(default_factory=TimeSeriesData)
 
@@ -374,6 +386,19 @@ class OfficerLoginResponse(BaseModel):
     token_type: str = "bearer"
     officer_email: str
     expires_in_seconds: int
+
+
+class AuditDecisionRequest(BaseModel):
+    decision: Literal["APPROVED", "DISAPPROVED", "PENDING"]
+    officer_remark: str | None = Field(default=None, max_length=300)
+
+
+class AuditDecisionResponse(BaseModel):
+    plot_id: str
+    audit_status: str
+    officer_remark: str | None = None
+    reviewed_at: str | None = None
+    message: str
 
 
 class VerifyDossierResponse(BaseModel):

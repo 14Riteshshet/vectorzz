@@ -54,6 +54,7 @@
       </div>
 
       <div class="header-actions">
+        <span class="server-status-pill" id="server-status-pill" title="Backend API connection status">● Local Server Ready</span>
         <span class="badge-hackathon" aria-label="Hackwarts 2026 AgriTech Track">Hackwarts 2026</span>
         <span class="officer-auth-badge" id="officer-auth-badge" style="display:none;">
           🛡 Officer Verified
@@ -88,7 +89,7 @@
       <!-- Hero -->
       <section class="hero" aria-labelledby="hero-title">
         <h1 class="hero-title" id="hero-title">
-          Precision Survival Water Coaching<br />for Tumakuru Farmers
+          Precision Survival Water Coaching<br />for Karnataka Farmers
         </h1>
         <p class="hero-subtitle" id="hero-subtitle">
           Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres,
@@ -155,12 +156,18 @@
                 <option value="Challakere">Challakere</option>
                 <option value="Hiriyur">Hiriyur</option>
               </optgroup>
-              <optgroup label="Chikkaballapur District">
+              <optgroup label="Chikkaballapur &amp; Kolar">
                 <option value="Bagepalli">Bagepalli</option>
+                <option value="Mulbagal">Mulbagal (Kolar)</option>
+                <option value="Kolar">Kolar</option>
               </optgroup>
-              <optgroup label="North Karnataka">
+              <optgroup label="North &amp; Central Karnataka">
                 <option value="Kalaburagi">Kalaburagi</option>
                 <option value="Vijayapura">Vijayapura</option>
+                <option value="Ballari">Ballari</option>
+                <option value="Koppal">Koppal</option>
+                <option value="Raichur">Raichur</option>
+                <option value="Haveri">Haveri</option>
               </optgroup>
             </select>
           </div>
@@ -184,6 +191,19 @@
           </div>
         </div>
 
+        <div class="regional-audit-toolbar">
+          <div class="regional-filter-pills" id="regional-status-filters" role="group" aria-label="Filter regional plots by audit status or photo">
+            <button type="button" class="regional-pill active" data-audit-filter="ALL" aria-pressed="true">All</button>
+            <button type="button" class="regional-pill" data-audit-filter="PENDING" aria-pressed="false">Pending</button>
+            <button type="button" class="regional-pill" data-audit-filter="APPROVED" aria-pressed="false">Approved</button>
+            <button type="button" class="regional-pill" data-audit-filter="DISAPPROVED" aria-pressed="false">Disapproved</button>
+            <button type="button" class="regional-pill" data-audit-filter="HAS_PHOTO" aria-pressed="false">Has Photo</button>
+          </div>
+          <button type="button" class="btn-secondary btn-cleanup-nophoto" id="btn-remove-nophoto">
+            🧹 Remove No-Photo Entries
+          </button>
+        </div>
+
         <div class="regional-table-wrap">
           <table class="regional-table" aria-label="Regional farmer plots table">
             <thead>
@@ -195,7 +215,7 @@
                 <th>Field Photo</th>
                 <th>Drought Stage</th>
                 <th>V<sub>surv</sub></th>
-                <th>Audit PDF</th>
+                <th>Audit &amp; Actions</th>
               </tr>
             </thead>
             <tbody id="regional-table-body">
@@ -244,12 +264,18 @@
                   <option value="Challakere">Challakere</option>
                   <option value="Hiriyur">Hiriyur</option>
                 </optgroup>
-                <optgroup label="Chikkaballapur District">
+                <optgroup label="Chikkaballapur &amp; Kolar">
                   <option value="Bagepalli">Bagepalli</option>
+                  <option value="Mulbagal">Mulbagal (Kolar)</option>
+                  <option value="Kolar">Kolar</option>
                 </optgroup>
-                <optgroup label="North Karnataka">
+                <optgroup label="North &amp; Central Karnataka">
                   <option value="Kalaburagi">Kalaburagi</option>
                   <option value="Vijayapura">Vijayapura</option>
+                  <option value="Ballari">Ballari</option>
+                  <option value="Koppal">Koppal</option>
+                  <option value="Raichur">Raichur</option>
+                  <option value="Haveri">Haveri</option>
                 </optgroup>
               </select>
             </div>
@@ -362,12 +388,18 @@
                   <option value="Challakere">Challakere</option>
                   <option value="Hiriyur">Hiriyur</option>
                 </optgroup>
-                <optgroup label="Chikkaballapur District">
+                <optgroup label="Chikkaballapur &amp; Kolar">
                   <option value="Bagepalli">Bagepalli</option>
+                  <option value="Mulbagal">Mulbagal (Kolar)</option>
+                  <option value="Kolar">Kolar</option>
                 </optgroup>
-                <optgroup label="North Karnataka">
+                <optgroup label="North &amp; Central Karnataka">
                   <option value="Kalaburagi">Kalaburagi</option>
                   <option value="Vijayapura">Vijayapura</option>
+                  <option value="Ballari">Ballari</option>
+                  <option value="Koppal">Koppal</option>
+                  <option value="Raichur">Raichur</option>
+                  <option value="Haveri">Haveri</option>
                 </optgroup>
               </select>
             </div>
@@ -476,6 +508,13 @@
               class="btn-primary"
             >
               <span class="btn-label">🛰 Analyse Plot</span>
+            </button>
+            <button
+              type="button"
+              id="btn-clear-plot"
+              class="btn-secondary"
+            >
+              🧹 Clear / New Plot
             </button>
           </div>
         </form>
@@ -717,7 +756,7 @@
               <li><strong>Notified Crop &amp; Area Rule:</strong> Crop (Ragi, Groundnut, Maize, Red Gram/Tur) and Gram Panchayat / Hobli must be notified by the Karnataka State Government for the current Kharif/Rabi season.</li>
               <li><strong>Mandatory Documents &amp; Timelines:</strong> Valid RTC / Survey No. (or tenancy agreement), Aadhaar-seeded active bank account for DBT payout, and enrollment before the seasonal cut-off date.</li>
             </ul>
-            <div class="pmfby-subbox">
+            <div class="pmfby-subbox" id="pmfby-checklist-subbox" style="display:none;">
               <div class="pmfby-subbox-title">✅ Live Plot Eligibility Check</div>
               <ul class="pmfby-checklist" id="pmfby-live-checklist"></ul>
             </div>
@@ -730,7 +769,7 @@
               <li><strong>Farmer Premium Cap (PMFBY Standard):</strong> Only <strong>2.0% of Sum Insured</strong> for Kharif food &amp; oilseed crops (Ragi, Maize, Groundnut, Tur), <strong>1.5%</strong> for Rabi crops, and <strong>5.0%</strong> for commercial/horticultural crops — remaining actuarial premium is subsidized by Central &amp; State Govts.</li>
               <li><strong>Indemnity &amp; Loss Triggers:</strong> Covers non-preventable risks including <strong>Mid-Season Adversity / Drought</strong>, <strong>Prevented Sowing</strong>, <strong>Localized Calamities</strong> (72-hr intimation), and <strong>Post-Harvest Losses</strong> (up to 14 days), assessed via <strong>YES-TECH (30%+ satellite weightage)</strong> &amp; CCE.</li>
             </ul>
-            <div class="pmfby-subbox">
+            <div class="pmfby-subbox" id="pmfby-estimator-subbox" style="display:none;">
               <div class="pmfby-subbox-title" id="pmfby-estimator-subtitle">💰 Dynamic Plot Payout Estimator</div>
               <div class="pmfby-est-grid">
                 <div class="pmfby-est-item">
@@ -771,10 +810,10 @@
             <p class="pmfby-card-lead">
               Sentinel-2 satellite telemetry (<code>NDVI/NDMI</code>), Open-Meteo rainfall/ET₀, and your geotagged field photo are bundled into a <strong>SHA-256 cryptographic hash</strong> that cannot be altered after submission.
             </p>
-            <div class="pmfby-subbox">
+            <div class="pmfby-subbox" id="pmfby-trust-proof-box" style="display:none;">
               <div class="pmfby-subbox-title">🔐 Live Verification Proof Box</div>
               <div class="pmfby-proof-rows">
-                <div><span>Dossier / Plot ID:</span> <code id="trust-dossier-id">Run Analyse Plot to generate</code></div>
+                <div><span>Dossier / Plot ID:</span> <code id="trust-dossier-id">—</code></div>
                 <div><span>Photo SHA-256:</span> <code id="trust-photo-hash">—</code></div>
                 <div><span>Dossier SHA-256:</span> <code id="trust-dossier-hash">—</code></div>
                 <div><span>Satellite Timestamp:</span> <strong id="trust-sat-timestamp">—</strong></div>
@@ -786,6 +825,9 @@
               <div class="pmfby-proof-actions">
                 <button type="button" class="btn-secondary" id="btn-trust-verify" style="padding:var(--space-2) var(--space-5);font-size:13px;" disabled>
                   🔍 Verify Dossier Authenticity
+                </button>
+                <button type="button" class="btn-secondary" id="btn-copy-claim-summary" style="padding:var(--space-2) var(--space-5);font-size:13px;" disabled>
+                  📋 Copy Claim Summary
                 </button>
               </div>
             </div>

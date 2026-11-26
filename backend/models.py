@@ -70,6 +70,10 @@ class FarmPlot(Base):
     ndmi: Mapped[float | None] = mapped_column(Float, nullable=True)
     ndre: Mapped[float | None] = mapped_column(Float, nullable=True)
     drought_stage: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    entry_source: Mapped[str] = mapped_column(String(32), default="Live Farmer Entry")
+    audit_status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    officer_remark: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)

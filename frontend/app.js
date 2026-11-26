@@ -35,8 +35,8 @@ var TALUK_PRESETS = {
 
 var MODE_COPY = {
   farmer: {
-    title: 'Precision Survival Water Coaching<br />for Tumakuru Farmers',
-    subtitle: 'Draw your farm plot or tap a Tumakuru preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a Kannada crop water advisory.'
+    title: 'Precision Survival Water Coaching<br />for Karnataka Farmers',
+    subtitle: 'Draw your farm plot or tap a Karnataka preset. Get exact V<sub>surv</sub> survival litres, 0–7 cm soil moisture, crop-stage borewell protection guidance, and a Kannada crop water advisory.'
   },
   officer: {
     title: 'Post-Harvest Drought Verification<br />&amp; PMFBY Claim Monitor',
@@ -65,6 +65,7 @@ var map = null;
 var drawnItems = null;
 var regionalHeatLayer = null;
 var regionalTalukFilter = 'ALL';
+var regionalAuditFilter = 'ALL';
 var regionalPlots = [];
 var selectedRegionalPlotId = null;
 var cadastralVillagesCache = [];
@@ -89,7 +90,26 @@ window.addEventListener('load', function() {
   initMap();
   initUI();
   updateOfficerBadgeUI();
+  checkServerHealth();
 });
+
+async function checkServerHealth() {
+  var $pill = document.getElementById('server-status-pill');
+  if (!$pill) return;
+  try {
+    var res = await fetch(API_BASE + '/api/health');
+    if (res.ok) {
+      $pill.textContent = '● Local Server Ready';
+      $pill.classList.remove('offline');
+    } else {
+      $pill.textContent = '● Server Reconnecting';
+      $pill.classList.add('offline');
+    }
+  } catch (e) {
+    $pill.textContent = '● Offline';
+    $pill.classList.add('offline');
+  }
+}
 
 // ── Map initialisation ────────────────────────────────────────────────────────
 function initMap() {
@@ -865,7 +885,10 @@ function initUI() {
     var el = document.getElementById(id);
     if (el) {
       el.addEventListener('input', function() { updatePmfbyGuidelinesUI(currentResult); });
-      el.addEventListener('change', function() { updatePmfbyGuidelinesUI(currentResult); });
+      el.addEventListener('change', function() {
+        if (id === 'taluk') updateFarmerHeroTitle();
+        updatePmfbyGuidelinesUI(currentResult);
+      });
     }
   });
 
@@ -879,7 +902,72 @@ function initUI() {
     });
   }
 
+  var $copySummaryBtn = document.getElementById('btn-copy-claim-summary');
+  if ($copySummaryBtn) {
+    $copySummaryBtn.addEventListener('click', async function() {
+      if (!currentResult) return;
+      var locParts = [currentResult.taluk, currentResult.village, currentResult.survey_no ? ('Sy. ' + currentResult.survey_no) : '']
+        .filter(Boolean).join(' · ');
+      var ndmiVal = currentResult.satellite && currentResult.satellite.ndmi != null
+        ? Number(currentResult.satellite.ndmi).toFixed(3) : 'N/A';
+      var stageLabel = (currentResult.drought && currentResult.drought.stage_label) || 'N/A';
+      var summaryText = [
+        'SookshmaJal PMFBY Claim Summary',
+        'Dossier / Plot ID: ' + (currentResult.dossier_id || currentResult.plot_id || 'N/A'),
+        'Farmer: ' + (currentResult.farmer_name || 'N/A'),
+        'Location: ' + (locParts || 'Tumakuru'),
+        'Crop & Area: ' + (currentResult.crop_type || 'N/A') + ' · ' + Number(currentResult.area_acres || 0).toFixed(1) + ' acres',
+        'Moisture (NDMI) / Stage: ' + ndmiVal + ' · ' + stageLabel,
+        'Geolock Status: ' + (currentResult.geolock_status || 'MISSING_GPS'),
+        'Dossier SHA-256: ' + (currentResult.pdf_sha256 || 'Pending')
+      ].join('\n');
+      try {
+        await navigator.clipboard.writeText(summaryText);
+        var origLabel = $copySummaryBtn.textContent;
+        $copySummaryBtn.textContent = '✅ Copied!';
+        setTimeout(function() { $copySummaryBtn.textContent = origLabel; }, 2000);
+        showToast('📋 Claim summary copied', 'success');
+      } catch (err) {
+        showToast('Unable to copy automatically.', 'warning');
+      }
+    });
+  }
+
+  var $clearPlotBtn = document.getElementById('btn-clear-plot');
+  if ($clearPlotBtn) {
+    $clearPlotBtn.addEventListener('click', function() {
+      resetFarmerPlotForm();
+    });
+  }
+
   updatePmfbyGuidelinesUI(null);
+
+  // ── Officer Audit Toolbar (Status/Photo Filters & Cleanup) ─────────────────
+  document.querySelectorAll('[data-audit-filter]').forEach(function(pill) {
+    pill.addEventListener('click', function() {
+      regionalAuditFilter = pill.dataset.auditFilter || 'ALL';
+      document.querySelectorAll('[data-audit-filter]').forEach(function(p) {
+        var isAct = p === pill;
+        p.classList.toggle('active', isAct);
+        p.setAttribute('aria-pressed', String(isAct));
+      });
+      renderRegionalTable(getFilteredRegionalPlots());
+    });
+  });
+
+  var $cleanupBtn = document.getElementById('btn-remove-nophoto');
+  if ($cleanupBtn) {
+    $cleanupBtn.addEventListener('click', async function() {
+      if (!window.confirm('Remove all entries that have no uploaded field photo?')) return;
+      try {
+        var res = await authFetchJSON('/api/audit/cleanup/no-photo', { method: 'DELETE' });
+        showToast('🧹 ' + (res.message || 'Removed no-photo entries.'), 'success');
+        loadRegionalSummary(regionalTalukFilter);
+      } catch (err) {
+        showToast('❌ ' + err.message, 'error');
+      }
+    });
+  }
 }
 
 // ── Mode Switcher Logic ──────────────────────────────────────────────────────
@@ -902,6 +990,7 @@ function setMode(mode) {
   var copy = MODE_COPY[mode];
   document.getElementById('hero-title').innerHTML = copy.title;
   document.getElementById('hero-subtitle').innerHTML = copy.subtitle;
+  if (mode === 'farmer') updateFarmerHeroTitle();
 
   document.getElementById('farmer-view').style.display = mode === 'farmer' ? 'block' : 'none';
   document.getElementById('officer-view').style.display = mode === 'officer' ? 'block' : 'none';
@@ -1651,7 +1740,53 @@ var CROP_SCALE_PER_ACRE = {
   sorghum: 38000
 };
 
+function resetFarmerPlotForm() {
+  var $form = document.getElementById('analyze-form');
+  if ($form) $form.reset();
+  document.querySelectorAll('.symptom-chip.active').forEach(function(c) {
+    c.classList.remove('active');
+    c.setAttribute('aria-pressed', 'false');
+  });
+  document.querySelectorAll('.btn-preset.selected').forEach(function(b) {
+    b.classList.remove('selected');
+    b.setAttribute('aria-pressed', 'false');
+  });
+  capturedPhotoData = null;
+  var $photoPreview = document.getElementById('photo-preview-box');
+  if ($photoPreview) $photoPreview.style.display = 'none';
+  var $photoInput = document.getElementById('field-photo-input');
+  if ($photoInput) $photoInput.value = '';
+  drawnPolygon = null;
+  selectedCadastral = null;
+  if (drawnItems) drawnItems.clearLayers();
+  updatePolygonStatus(0);
+  var $cadMeta = document.getElementById('cad-parcel-meta');
+  if ($cadMeta) { $cadMeta.textContent = ''; $cadMeta.classList.remove('visible'); }
+  currentResult = null;
+  var $results = document.getElementById('results-section');
+  if ($results) $results.classList.remove('visible');
+  var $eligCard = document.getElementById('farmer-eligibility-card');
+  if ($eligCard) $eligCard.style.display = 'none';
+  updatePmfbyGuidelinesUI(null);
+  updateFarmerHeroTitle();
+  showToast('🧹 Cleared form for a new plot', 'success');
+}
+
 function updatePmfbyGuidelinesUI(analysisData) {
+  var $checkSubbox = document.getElementById('pmfby-checklist-subbox');
+  var $estSubbox = document.getElementById('pmfby-estimator-subbox');
+  var $proofSubbox = document.getElementById('pmfby-trust-proof-box');
+  var hasAnalysis = Boolean(analysisData && analysisData.plot_id);
+  if ($checkSubbox) $checkSubbox.style.display = hasAnalysis ? 'block' : 'none';
+  if ($estSubbox) $estSubbox.style.display = hasAnalysis ? 'block' : 'none';
+  if ($proofSubbox) $proofSubbox.style.display = hasAnalysis ? 'block' : 'none';
+  var $copyBtn = document.getElementById('btn-copy-claim-summary');
+  if ($copyBtn) $copyBtn.disabled = !hasAnalysis;
+  if (!hasAnalysis) {
+    var $vBtnReset = document.getElementById('btn-trust-verify');
+    if ($vBtnReset) $vBtnReset.disabled = true;
+    return;
+  }
   var areaEl = document.getElementById('area-acres');
   var cropEl = document.getElementById('crop-type');
   var talukEl = document.getElementById('taluk');
@@ -1807,19 +1942,56 @@ async function authFetchJSON(url, options) {
   return res.json();
 }
 
+var TALUK_TO_DISTRICT = {
+  Madhugiri: 'Tumakuru', Koratagere: 'Tumakuru', Chikkanayakanahalli: 'Tumakuru',
+  Tumakuru: 'Tumakuru', Pavagada: 'Tumakuru', Tiptur: 'Tumakuru',
+  Turuvekere: 'Tumakuru', Kunigal: 'Tumakuru', Sira: 'Tumakuru', Gubbi: 'Tumakuru',
+  Challakere: 'Chitradurga', Hiriyur: 'Chitradurga',
+  Bagepalli: 'Chikkaballapur', Mulbagal: 'Kolar', Kolar: 'Kolar',
+  Kalaburagi: 'Kalaburagi', Vijayapura: 'Vijayapura',
+  Ballari: 'Ballari', Koppal: 'Koppal', Raichur: 'Raichur', Haveri: 'Haveri'
+};
+
+function updateFarmerHeroTitle() {
+  if (activeMode !== 'farmer') return;
+  var $taluk = document.getElementById('taluk');
+  var $heroTitle = document.getElementById('hero-title');
+  if (!$heroTitle) return;
+  var talukVal = $taluk && $taluk.value ? $taluk.value : '';
+  var dist = TALUK_TO_DISTRICT[talukVal] || 'Karnataka';
+  $heroTitle.innerHTML = 'Precision Survival Water Coaching<br />for ' + escHtml(dist) + ' Farmers';
+}
+
+function markPhotoUnavailable(img) {
+  if (!img || !img.parentNode) return;
+  var span = document.createElement('span');
+  span.className = 'photo-unavailable-label';
+  span.textContent = 'Photo unavailable';
+  img.parentNode.replaceChild(span, img);
+}
+
 function loadAuthenticatedPhotoThumbs(containerEl) {
   if (!containerEl || !officerToken) return;
   containerEl.querySelectorAll('img[data-auth-photo-url]').forEach(async function(img) {
     var url = img.getAttribute('data-auth-photo-url');
-    if (!url) return;
+    if (!url) {
+      markPhotoUnavailable(img);
+      return;
+    }
+    img.onerror = function() { markPhotoUnavailable(img); };
     try {
       var res = await fetch(url, {
         headers: { Authorization: 'Bearer ' + officerToken }
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        markPhotoUnavailable(img);
+        return;
+      }
       var blob = await res.blob();
       img.src = URL.createObjectURL(blob);
-    } catch (e) {}
+    } catch (e) {
+      markPhotoUnavailable(img);
+    }
   });
 }
 
@@ -1916,12 +2088,23 @@ async function loadRegionalSummary(taluk) {
       (data.normal_count || 0) + ' healthy plots';
 
     renderRegionalHeatmap(regionalPlots);
-    renderRegionalTable(regionalPlots);
+    renderRegionalTable(getFilteredRegionalPlots());
   } catch (err) {
     $tbody.innerHTML =
       '<tr><td colspan="8" class="regional-empty" style="color:var(--color-3);">Failed to load regional plots: ' +
       escHtml(err.message) + '</td></tr>';
   }
+}
+
+function getFilteredRegionalPlots() {
+  if (!regionalPlots) return [];
+  if (regionalAuditFilter === 'ALL') return regionalPlots;
+  if (regionalAuditFilter === 'HAS_PHOTO') {
+    return regionalPlots.filter(function(p) { return Boolean(p.photo_attached || p.photo_url); });
+  }
+  return regionalPlots.filter(function(p) {
+    return (p.audit_status || 'PENDING') === regionalAuditFilter;
+  });
 }
 
 function geolockPillClass(status) {
@@ -1935,7 +2118,7 @@ function renderRegionalTable(plots) {
   var $tbody = document.getElementById('regional-table-body');
   if (!plots || plots.length === 0) {
     $tbody.innerHTML =
-      '<tr><td colspan="8" class="regional-empty">No farmer plots recorded for this region yet.</td></tr>';
+      '<tr><td colspan="8" class="regional-empty">No farmer plots match this filter.</td></tr>';
     return;
   }
 
@@ -1966,14 +2149,33 @@ function renderRegionalTable(plots) {
             escHtml(p.plot_id) + '">📷 View Photo</button>'
         : '');
 
-    var dossierCell = p.pdf_download_url
+    var auditStatus = p.audit_status || 'PENDING';
+    var auditCls = auditStatus === 'APPROVED' ? 'approved' : (auditStatus === 'DISAPPROVED' ? 'disapproved' : 'pending');
+    var entrySrc = p.entry_source || 'Live Farmer Entry';
+    var isSeeded = entrySrc.toLowerCase().indexOf('seed') !== -1;
+    var dossierBtn = p.pdf_download_url
       ? '<a href="' + escHtml(p.pdf_download_url) + '" download class="btn-secondary regional-row-btn" data-pdf-dl="1" style="text-decoration:none;">⬇ Audit PDF</a>'
       : '<button type="button" class="btn-secondary regional-row-btn" data-generate-plot="' +
           escHtml(p.plot_id) + '">📄 Audit PDF</button>';
+    var deleteBtn = auditStatus === 'DISAPPROVED'
+      ? '<button type="button" class="btn-audit-delete" data-audit-delete="' + escHtml(p.plot_id) + '">🗑 Delete</button>'
+      : '';
+    var actionsCell = '<div class="regional-actions-stack">' +
+      '<span class="audit-status-pill ' + auditCls + '">' + escHtml(auditStatus) + '</span>' +
+      (p.officer_remark ? '<div class="audit-remark-text">' + escHtml(p.officer_remark) + '</div>' : '') +
+      '<div class="audit-decision-actions">' +
+        '<button type="button" class="btn-audit-approve" data-audit-decision="APPROVED" data-plot-id="' + escHtml(p.plot_id) + '">✅ Approve</button>' +
+        '<button type="button" class="btn-audit-disapprove" data-audit-decision="DISAPPROVED" data-plot-id="' + escHtml(p.plot_id) + '">❌ Disapprove</button>' +
+        deleteBtn +
+      '</div>' +
+      dossierBtn +
+    '</div>';
 
-    return '<tr class="regional-row' + (isSel ? ' selected' : '') + '" data-plot-id="' + escHtml(p.plot_id) + '">' +
+    var rowCls = 'regional-row' + (isSel ? ' selected' : '') + (auditStatus === 'DISAPPROVED' ? ' disapproved' : '');
+    return '<tr class="' + rowCls + '" data-plot-id="' + escHtml(p.plot_id) + '">' +
       '<td><strong>' + escHtml(p.farmer_name) + '</strong><br/>' +
-        '<span class="plot-row-meta">' + escHtml(p.phone_number || new Date(p.created_at).toLocaleDateString('en-IN')) + '</span></td>' +
+        '<span class="plot-row-meta">' + escHtml(p.phone_number || new Date(p.created_at).toLocaleDateString('en-IN')) + '</span><br/>' +
+        '<span class="entry-source-pill' + (isSeeded ? ' seeded' : '') + '">' + escHtml(entrySrc) + '</span></td>' +
       '<td>' + escHtml(p.taluk) + '<br/><span class="plot-row-meta">' + escHtml(p.district || 'Tumakuru') + '</span></td>' +
       '<td>' + surveyTxt + '</td>' +
       '<td>' + escHtml(p.crop_type) + ' · ' + Number(p.area_acres).toFixed(1) + ' ac</td>' +
@@ -1981,14 +2183,64 @@ function renderRegionalTable(plots) {
       '<td><span class="drought-badge ' + cls + '" style="font-size:12px;padding:3px 10px;">' +
         escHtml(stageText) + '</span></td>' +
       '<td>' + vsurvTxt + '</td>' +
-      '<td>' + dossierCell + '</td>' +
+      '<td>' + actionsCell + '</td>' +
     '</tr>';
   }).join('');
 
   $tbody.querySelectorAll('.regional-row').forEach(function(row) {
     row.addEventListener('click', function(e) {
-      if (e.target && (e.target.closest('[data-generate-plot]') || e.target.closest('[data-view-photo]') || e.target.closest('[data-pdf-dl]'))) return;
+      if (e.target && (e.target.closest('[data-generate-plot]') || e.target.closest('[data-view-photo]') || e.target.closest('[data-pdf-dl]') || e.target.closest('[data-audit-decision]') || e.target.closest('[data-audit-delete]'))) return;
       selectRegionalPlot(row.dataset.plotId, false);
+    });
+  });
+
+  $tbody.querySelectorAll('[data-audit-decision]').forEach(function(btn) {
+    btn.addEventListener('click', async function(e) {
+      e.stopPropagation();
+      var plotId = btn.dataset.plotId;
+      var decision = btn.dataset.auditDecision;
+      var remarkPrompt = decision === 'DISAPPROVED'
+        ? 'Optional reason for disapproving this claim:'
+        : 'Optional approval remark:';
+      var remark = window.prompt(remarkPrompt, '');
+      if (remark === null) return;
+      try {
+        var updated = await authFetchJSON('/api/audit/' + encodeURIComponent(plotId) + '/decision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: decision, officer_remark: remark.trim() || null })
+        });
+        var item = regionalPlots.find(function(x) { return x.plot_id === plotId; });
+        if (item) {
+          item.audit_status = updated.audit_status;
+          item.officer_remark = updated.officer_remark;
+          item.reviewed_at = updated.reviewed_at;
+          item.pdf_download_url = null;
+        }
+        renderRegionalTable(getFilteredRegionalPlots());
+        showToast('✅ ' + updated.message, 'success');
+      } catch (err) {
+        showToast('❌ ' + err.message, 'error');
+      }
+    });
+  });
+
+  $tbody.querySelectorAll('[data-audit-delete]').forEach(function(btn) {
+    btn.addEventListener('click', async function(e) {
+      e.stopPropagation();
+      var plotId = btn.dataset.auditDelete;
+      if (!window.confirm('Delete this disapproved claim record permanently?')) return;
+      try {
+        await authFetchJSON('/api/audit/' + encodeURIComponent(plotId), { method: 'DELETE' });
+        regionalPlots = regionalPlots.filter(function(x) { return x.plot_id !== plotId; });
+        if (selectedRegionalPlotId === plotId) selectedRegionalPlotId = null;
+        renderRegionalHeatmap(regionalPlots);
+        renderRegionalTable(getFilteredRegionalPlots());
+        loadRegionalSummary(regionalTalukFilter);
+        showToast('🗑 Disapproved record deleted.', 'success');
+      } catch (err) {
+        showToast('❌ ' + err.message, 'error');
+      }
     });
   });
 
@@ -2018,7 +2270,7 @@ async function selectRegionalPlot(plotId, triggerDossier) {
   if (!item) return;
 
   selectedRegionalPlotId = plotId;
-  renderRegionalTable(regionalPlots);
+  renderRegionalTable(getFilteredRegionalPlots());
 
   // Draw polygon on Leaflet map
   if (map && drawnItems && item.polygon_coordinates && item.polygon_coordinates.length >= 4) {

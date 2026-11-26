@@ -976,3 +976,218 @@ async def test_farmer_entry_persistence_photo_serving_and_ui_separation(
     assert 'id="farmer-elig-photo-img"' in html_text
     assert "loadAuthenticatedPhotoThumbs" in js_text
     assert "pmfby-guidelines-section" in js_text
+
+
+@pytest.mark.anyio
+async def test_officer_audit_decision_and_multi_district_seeding(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Officer Approve/Disapprove persists in DB + PDF, and multi-district seeded samples are tagged."""
+    from backend.config import get_settings
+    from backend.database import _seed_demo_plots_if_empty
+
+    await _seed_demo_plots_if_empty()
+    cfg = get_settings()
+
+    # Submit a live farmer entry
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)),
+        patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+    ):
+        live_resp = await async_client.post(
+            "/api/analyze-plot",
+            json={**VALID_PAYLOAD, "farmer_name": "Live Audit Farmer"},
+        )
+    assert live_resp.status_code == 200
+    live_data = live_resp.json()
+    assert live_data["entry_source"] == "Live Farmer Entry"
+    assert live_data["audit_status"] == "PENDING"
+    plot_id = live_data["plot_id"]
+
+    # Unauthenticated decision must return 401
+    unauth = await async_client.post(
+        f"/api/audit/{plot_id}/decision",
+        json={"decision": "APPROVED", "officer_remark": "Valid"},
+    )
+    assert unauth.status_code == 401
+
+    login_resp = await async_client.post(
+        "/api/officer/login",
+        json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    # Approve then Disapprove with remark
+    app_resp = await async_client.post(
+        f"/api/audit/{plot_id}/decision",
+        json={"decision": "APPROVED", "officer_remark": "NDMI deficit verified"},
+        headers=headers,
+    )
+    assert app_resp.status_code == 200
+    assert app_resp.json()["audit_status"] == "APPROVED"
+    assert app_resp.json()["officer_remark"] == "NDMI deficit verified"
+
+    dis_resp = await async_client.post(
+        f"/api/audit/{plot_id}/decision",
+        json={"decision": "DISAPPROVED", "officer_remark": "Crop mismatch"},
+        headers=headers,
+    )
+    assert dis_resp.status_code == 200
+    assert dis_resp.json()["audit_status"] == "DISAPPROVED"
+
+    # Verify regional summary reflects decision + multi-district seeded samples
+    reg_resp = await async_client.get("/api/regional/summary?taluk=ALL", headers=headers)
+    assert reg_resp.status_code == 200
+    plots = reg_resp.json()["plots"]
+    live_row = next(p for p in plots if p["plot_id"] == plot_id)
+    assert live_row["audit_status"] == "DISAPPROVED"
+    assert live_row["officer_remark"] == "Crop mismatch"
+    assert live_row["entry_source"] == "Live Farmer Entry"
+
+    districts = {p["district"] for p in plots}
+    for expected_dist in ("Tumakuru", "Chitradurga", "Kolar", "Ballari", "Raichur", "Haveri"):
+        assert expected_dist in districts
+    seeded_rows = [p for p in plots if p["entry_source"] == "Seeded Sample"]
+    assert len(seeded_rows) >= 10
+
+    # Regenerated Audit PDF reflects updated audit_status
+    with patch("backend.main.settings.PDF_OUTPUT_DIR", str(tmp_path)):
+        dossier_resp = await async_client.post(f"/api/dossier/{plot_id}")
+    assert dossier_resp.status_code == 200
+    verify_resp = await async_client.get(f"/api/verify/{dossier_resp.json()['sha256_hash']}")
+    assert verify_resp.status_code == 200
+    assert verify_resp.json()["claim_payload"]["audit_status"] == "DISAPPROVED"
+    assert verify_resp.json()["claim_payload"]["officer_remark"] == "Crop mismatch"
+
+
+@pytest.mark.anyio
+async def test_delete_disapproved_and_cleanup_no_photo_entries(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Officer can delete disapproved records, clean up no-photo entries, and UI has grayed-out/filter hooks."""
+    from backend.config import get_settings
+
+    cfg = get_settings()
+    buf = io.BytesIO()
+    PILImage.new("RGB", (32, 32), color=(40, 120, 40)).save(buf, format="PNG")
+    photo_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+    pdf_dir = tmp_path / "pdfs"
+    photo_dir = tmp_path / "photos"
+    with (
+        patch("backend.main.settings.PDF_OUTPUT_DIR", str(pdf_dir)),
+        patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(photo_dir)),
+        patch("backend.main.fetch_sentinel2_indices", return_value=MOCK_SAT_DATA),
+        patch("backend.main.get_hydromet_data", return_value=MOCK_HYDROMET_DATA),
+        patch("backend.main.generate_voice_advisory", return_value=(None, "")),
+    ):
+        with_photo = await async_client.post(
+            "/api/analyze-plot",
+            json={
+                **VALID_PAYLOAD,
+                "farmer_name": "Photo Keep Farmer",
+                "photo_base64": photo_b64,
+                "photo_filename": "keep.png",
+                "photo_lat": 13.6621,
+                "photo_lon": 77.2017,
+            },
+        )
+        no_photo = await async_client.post(
+            "/api/analyze-plot",
+            json={**VALID_PAYLOAD, "farmer_name": "No Photo Delete Farmer"},
+        )
+
+    assert with_photo.status_code == 200
+    assert no_photo.status_code == 200
+    keep_id = with_photo.json()["plot_id"]
+    del_id = no_photo.json()["plot_id"]
+
+    # Unauthenticated delete & cleanup must fail with 401
+    assert (await async_client.delete(f"/api/audit/{del_id}")).status_code == 401
+    assert (await async_client.delete("/api/audit/cleanup/no-photo")).status_code == 401
+
+    login_resp = await async_client.post(
+        "/api/officer/login",
+        json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    # Disapprove then delete specific record
+    dis = await async_client.post(
+        f"/api/audit/{del_id}/decision",
+        json={"decision": "DISAPPROVED", "officer_remark": "Missing field photo"},
+        headers=headers,
+    )
+    assert dis.status_code == 200
+    assert dis.json()["audit_status"] == "DISAPPROVED"
+
+    del_resp = await async_client.delete(f"/api/audit/{del_id}", headers=headers)
+    assert del_resp.status_code == 200
+    assert del_resp.json()["deleted"] is True
+    assert (await async_client.delete(f"/api/audit/{del_id}", headers=headers)).status_code == 404
+
+    # Cleanup no-photo entries removes remaining no-photo rows but keeps photo-attached row
+    cleanup_resp = await async_client.delete("/api/audit/cleanup/no-photo", headers=headers)
+    assert cleanup_resp.status_code == 200
+    assert cleanup_resp.json()["deleted_count"] >= 0
+
+    reg_resp = await async_client.get("/api/regional/summary?taluk=ALL", headers=headers)
+    assert reg_resp.status_code == 200
+    remaining_ids = {p["plot_id"] for p in reg_resp.json()["plots"]}
+    assert keep_id in remaining_ids
+    assert del_id not in remaining_ids
+    assert all(p["photo_attached"] for p in reg_resp.json()["plots"])
+
+    # Verify UI hooks for grayed-out disapproved rows, delete button, and filter toolbar
+    html_text = (Path(__file__).parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    css_text = (Path(__file__).parent.parent / "frontend" / "styles.css").read_text(encoding="utf-8")
+    js_text = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+    assert 'id="btn-remove-nophoto"' in html_text
+    assert 'data-audit-filter="HAS_PHOTO"' in html_text
+    assert ".regional-row.disapproved" in css_text
+    assert "data-audit-delete" in js_text
+
+
+def test_farmer_pre_analysis_clean_state_and_action_buttons():
+    """Pre-analysis plot sub-boxes stay hidden until Analyse Plot; Clear, Copy Summary, and Server Ready pill exist."""
+    html_text = (Path(__file__).parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    js_text = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+    assert 'id="server-status-pill"' in html_text
+    assert "Local Server Ready" in html_text
+    assert 'id="btn-clear-plot"' in html_text
+    assert 'id="btn-copy-claim-summary"' in html_text
+    assert 'id="pmfby-checklist-subbox" style="display:none;"' in html_text
+    assert 'id="pmfby-estimator-subbox" style="display:none;"' in html_text
+    assert 'id="pmfby-trust-proof-box" style="display:none;"' in html_text
+    assert "resetFarmerPlotForm" in js_text
+    assert "checkServerHealth" in js_text
+
+
+@pytest.mark.anyio
+async def test_photo_missing_on_disk_404_and_karnataka_district_consistency(
+    async_client: AsyncClient, tmp_path: Path
+):
+    """Missing photo on disk returns 404 cleanly; UI handles missing photos and uses consistent Karnataka/district naming."""
+    from backend.config import get_settings
+
+    cfg = get_settings()
+    login_resp = await async_client.post(
+        "/api/officer/login",
+        json={"username": cfg.OFFICER_USERNAME, "password": cfg.OFFICER_PASSWORD},
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    with patch("backend.main.settings.PHOTO_UPLOAD_DIR", str(tmp_path)):
+        missing_resp = await async_client.get("/api/photos/nonexistent_photo.png", headers=headers)
+    assert missing_resp.status_code == 404
+
+    html_text = (Path(__file__).parent.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    js_text = (Path(__file__).parent.parent / "frontend" / "app.js").read_text(encoding="utf-8")
+    assert "for Karnataka Farmers" in html_text
+    assert "for Karnataka Farmers" in js_text
+    assert "markPhotoUnavailable" in js_text
+    assert "Photo unavailable" in js_text
+    assert '<option value="Hiriyur">Hiriyur</option>' in html_text
+    assert '<option value="Kolar">Kolar</option>' in html_text

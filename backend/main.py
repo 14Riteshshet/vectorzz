@@ -45,6 +45,8 @@ from backend.satellite import fetch_sentinel2_indices, load_taluk_cache
 from backend.schemas import (
     AnalyzePlotRequest,
     AnalyzePlotResponse,
+    AuditDecisionRequest,
+    AuditDecisionResponse,
     CadastralParcelResponse,
     CadastralVillagesResponse,
     CadastralVillageSummary,
@@ -80,6 +82,15 @@ logging.basicConfig(
 )
 
 settings = get_settings()
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _resolve_photo_upload_dir() -> Path:
+    """Resolve PHOTO_UPLOAD_DIR consistently relative to project root."""
+    p = Path(settings.PHOTO_UPLOAD_DIR)
+    if not p.is_absolute():
+        p = _PROJECT_ROOT / p
+    return p.resolve()
 
 # ── Rate limiter ───────────────────────────────────────────────────────────────
 if _SLOWAPI:
@@ -100,7 +111,7 @@ async def lifespan(app: FastAPI):
     logger.info("SookshmaJal starting up – initialising database …")
     await init_db()
     Path(settings.PDF_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
-    Path(settings.PHOTO_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    _resolve_photo_upload_dir().mkdir(parents=True, exist_ok=True)
     logger.info("Ready. Team VECTORZZ · Hackwarts 2026 🌱")
     yield
     logger.info("SookshmaJal shutting down.")
@@ -276,6 +287,17 @@ _TALUK_TO_DISTRICT = {
     "Bagepalli": "Chikkaballapur",
     "Kalaburagi": "Kalaburagi",
     "Vijayapura": "Vijayapura",
+    "Indi": "Vijayapura",
+    "Mulbagal": "Kolar",
+    "Kolar": "Kolar",
+    "Siruguppa": "Ballari",
+    "Ballari": "Ballari",
+    "Yelburga": "Koppal",
+    "Koppal": "Koppal",
+    "Lingsugur": "Raichur",
+    "Raichur": "Raichur",
+    "Ranebennur": "Haveri",
+    "Haveri": "Haveri",
 }
 
 
@@ -433,7 +455,7 @@ def _save_uploaded_photo(
 
     exif_lat, exif_lon, exif_ts = _extract_exif_gps(img_bytes)
     photo_sha256 = hashlib.sha256(img_bytes).hexdigest()
-    upload_dir = Path(settings.PHOTO_UPLOAD_DIR)
+    upload_dir = _resolve_photo_upload_dir()
     upload_dir.mkdir(parents=True, exist_ok=True)
     out_path = upload_dir / f"{plot_id}.{ext}"
     out_path.write_bytes(img_bytes)
@@ -658,6 +680,8 @@ async def analyze_plot(
         ndmi=sat_indices.ndmi,
         ndre=sat_indices.ndre,
         drought_stage=drought.stage,
+        entry_source="Live Farmer Entry",
+        audit_status="PENDING",
     )
     db.add(db_plot)
 
@@ -715,6 +739,8 @@ async def analyze_plot(
         "irrigation_source": body.irrigation_source,
         "observed_symptoms": body.observed_symptoms,
         "pmfby_eligible": pmfby_eligible,
+        "entry_source": "Live Farmer Entry",
+        "audit_status": "PENDING",
         "photo_sha256": photo_sha256,
         "photo_lat": eff_photo_lat,
         "photo_lon": eff_photo_lon,
@@ -797,6 +823,10 @@ async def analyze_plot(
         pdf_sha256=pdf_sha256,
         pdf_download_url=pdf_download_url,
         dossier_id=dossier_id,
+        entry_source="Live Farmer Entry",
+        audit_status="PENDING",
+        officer_remark=None,
+        reviewed_at=None,
         analysed_at=analysed_at,
     )
 
@@ -901,6 +931,10 @@ async def list_plots(request: Request, db: DbSession):
                 dossier_id=latest_dossier.id if latest_dossier else None,
                 dossier_hash=latest_dossier.sha256_hash if latest_dossier else None,
                 pdf_download_url=pdf_url,
+                entry_source=p.entry_source or "Live Farmer Entry",
+                audit_status=p.audit_status or "PENDING",
+                officer_remark=p.officer_remark,
+                reviewed_at=p.reviewed_at.isoformat() if p.reviewed_at else None,
                 created_at=p.created_at.isoformat(),
             )
         )
@@ -1058,6 +1092,10 @@ async def regional_summary(
                 dossier_id=latest_dossier.id if latest_dossier else None,
                 dossier_hash=latest_dossier.sha256_hash if latest_dossier else None,
                 pdf_download_url=pdf_url,
+                entry_source=p.entry_source or "Live Farmer Entry",
+                audit_status=p.audit_status or "PENDING",
+                officer_remark=p.officer_remark,
+                reviewed_at=p.reviewed_at.isoformat() if p.reviewed_at else None,
                 is_verified=bool(latest_dossier.is_verified) if latest_dossier else False,
                 time_series=ts_data,
             )
@@ -1073,6 +1111,72 @@ async def regional_summary(
         ready_for_audit_count=ready_for_audit_count,
         plots=items,
     )
+
+
+@app.post(
+    "/api/audit/{plot_id}/decision",
+    response_model=AuditDecisionResponse,
+    tags=["Regional"],
+)
+async def submit_audit_decision(
+    plot_id: str,
+    body: AuditDecisionRequest,
+    db: DbSession,
+    _officer: OfficerUser,
+):
+    """Approve or disapprove a farmer claim in the Officer Audit table."""
+    res = await db.execute(select(FarmPlot).where(FarmPlot.id == plot_id))
+    plot = res.scalar_one_or_none()
+    if plot is None:
+        raise HTTPException(status_code=404, detail="Plot not found.")
+
+    now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+    plot.audit_status = body.decision
+    plot.officer_remark = (body.officer_remark or "").strip() or None
+    plot.reviewed_at = now_dt
+    await db.flush()
+
+    return AuditDecisionResponse(
+        plot_id=plot.id,
+        audit_status=plot.audit_status,
+        officer_remark=plot.officer_remark,
+        reviewed_at=plot.reviewed_at.isoformat(),
+        message=f"Claim marked as {plot.audit_status}.",
+    )
+
+
+@app.delete("/api/audit/cleanup/no-photo", tags=["Regional"])
+async def cleanup_no_photo_entries(db: DbSession, _officer: OfficerUser):
+    """Delete all FarmPlot records that have no uploaded field photo."""
+    res = await db.execute(
+        select(FarmPlot).where(
+            FarmPlot.photo_path.is_(None) | (FarmPlot.photo_path == "")
+        )
+    )
+    rows = res.scalars().all()
+    for row in rows:
+        await db.delete(row)
+    await db.flush()
+    return {
+        "deleted_count": len(rows),
+        "message": f"Removed {len(rows)} no-photo entries.",
+    }
+
+
+@app.delete("/api/audit/{plot_id}", tags=["Regional"])
+async def delete_audit_record(plot_id: str, db: DbSession, _officer: OfficerUser):
+    """Delete a specific FarmPlot audit record by ID."""
+    res = await db.execute(select(FarmPlot).where(FarmPlot.id == plot_id))
+    plot = res.scalar_one_or_none()
+    if plot is None:
+        raise HTTPException(status_code=404, detail="Plot not found.")
+    await db.delete(plot)
+    await db.flush()
+    return {
+        "deleted": True,
+        "plot_id": plot_id,
+        "message": "Audit record deleted.",
+    }
 
 
 @app.post(
@@ -1109,7 +1213,12 @@ async def generate_plot_dossier(
     )
     existing_claim = claim_res.scalars().first()
 
-    if existing_claim and Path(existing_claim.pdf_path).exists():
+    existing_payload = (existing_claim.claim_payload or {}) if existing_claim else {}
+    same_audit = (
+        existing_payload.get("audit_status") == (plot.audit_status or "PENDING")
+        and existing_payload.get("officer_remark") == plot.officer_remark
+    )
+    if existing_claim and same_audit and Path(existing_claim.pdf_path).exists():
         if not existing_claim.is_verified:
             existing_claim.is_verified = True
             existing_claim.verified_at = datetime.utcnow()
@@ -1166,6 +1275,10 @@ async def generate_plot_dossier(
         "observed_symptoms": plot.observed_symptoms or [],
         "pmfby_eligible": plot.pmfby_eligible
         or _compute_pmfby_eligibility(drought.stage),
+        "entry_source": plot.entry_source or "Live Farmer Entry",
+        "audit_status": plot.audit_status or "PENDING",
+        "officer_remark": plot.officer_remark,
+        "reviewed_at": plot.reviewed_at.isoformat() if plot.reviewed_at else None,
         "photo_sha256": plot.photo_sha256,
         "photo_lat": plot.photo_lat,
         "photo_lon": plot.photo_lon,
@@ -1354,7 +1467,7 @@ async def get_cadastral_parcel(taluk: str, village: str, survey_no: str):
 async def get_uploaded_photo(filename: str, _officer: OfficerUser):
     """Serve an uploaded geotagged field photo (protected; requires Officer token)."""
     safe_name = Path(filename).name
-    photo_dir = Path(settings.PHOTO_UPLOAD_DIR).resolve()
+    photo_dir = _resolve_photo_upload_dir()
     photo_path = (photo_dir / safe_name).resolve()
     if not photo_path.exists() or photo_path.parent != photo_dir:
         raise HTTPException(status_code=404, detail="Photo not found.")

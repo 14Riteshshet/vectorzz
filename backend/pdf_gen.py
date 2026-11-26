@@ -141,6 +141,10 @@ def generate_pmfby_pdf(
     irrigation_source = payload.get("irrigation_source")
     observed_symptoms = payload.get("observed_symptoms") or []
     pmfby_eligible = payload.get("pmfby_eligible")
+    entry_source = payload.get("entry_source", "Live Farmer Entry")
+    audit_status = payload.get("audit_status", "PENDING")
+    officer_remark = payload.get("officer_remark")
+    reviewed_at = payload.get("reviewed_at")
     photo_sha256 = payload.get("photo_sha256")
     photo_lat = payload.get("photo_lat")
     photo_lon = payload.get("photo_lon")
@@ -251,6 +255,13 @@ def generate_pmfby_pdf(
         farm_data.append(["Observed Symptoms", ", ".join(map(str, observed_symptoms))])
     if pmfby_eligible:
         farm_data.append(["PMFBY Eligibility", str(pmfby_eligible)])
+    farm_data.append(["Entry Source", str(entry_source)])
+    audit_line = str(audit_status)
+    if reviewed_at:
+        audit_line += f" (Reviewed: {reviewed_at})"
+    farm_data.append(["Officer Audit Status", audit_line])
+    if officer_remark:
+        farm_data.append(["Officer Remark", str(officer_remark)])
     dist_txt = f"{float(distance_km):.2f} km" if distance_km is not None else "N/A"
     farm_data.append(
         [
